@@ -161,9 +161,16 @@ export default function HomePage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Dynamic 7 days of the week (Monday to Sunday)
-  const weekDays = useMemo(() => getWeekDays(), []);
-  const todayItem = weekDays.find((d) => d.isToday) || weekDays[0];
+  // Dynamic 7 days of the week (Monday to Sunday) - initialized in useEffect to avoid unstable date prerender
+  const [weekDays, setWeekDays] = useState([]);
+
+  useEffect(() => {
+    setWeekDays(getWeekDays());
+  }, []);
+
+  const todayItem = useMemo(() => {
+    return weekDays.find((d) => d.isToday) || weekDays[0] || { label: "Today", short: "Today", dateFormatted: "", offset: 0, isToday: true };
+  }, [weekDays]);
 
   // Fetch Airing Schedule when Home Day widget changes
   const handleDaySelect = async (offset) => {

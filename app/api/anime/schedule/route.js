@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { getAiringSchedule } from "@/utils/anilist";
 
 export async function GET(request) {
+  const { searchParams } = new URL(request.url);
   try {
-    const { searchParams } = new URL(request.url);
     const dayOffset = parseInt(searchParams.get("dayOffset") || "0", 10);
     const perPage = parseInt(searchParams.get("perPage") || "50", 10);
 

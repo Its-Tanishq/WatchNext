@@ -31,8 +31,8 @@ export async function POST(req) {
 }
 
 export async function GET(req) {
+  const { searchParams } = new URL(req.url);
   try {
-    const { searchParams } = new URL(req.url);
     const idsParam = searchParams.get("ids");
     const animeIds = idsParam ? idsParam.split(",").map(Number).filter(Boolean) : [];
 

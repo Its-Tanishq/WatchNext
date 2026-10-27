@@ -30,8 +30,8 @@ export async function POST(req) {
 }
 
 export async function GET(req) {
+  const { searchParams } = new URL(req.url);
   try {
-    const { searchParams } = new URL(req.url);
     const seedsParam = searchParams.get("seeds");
     const excludeParam = searchParams.get("exclude");
 

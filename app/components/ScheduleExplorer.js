@@ -6,18 +6,30 @@ import { formatScore, getAnimeTitle, getWeekDays } from "@/utils/anilist";
 import { X, Star, ArrowRight, ArrowLeft } from "lucide-react";
 
 export default function ScheduleExplorer({ onBackToHome, onSelectAnime }) {
-  // Dynamically calculate the real 7 days of this week (Mon-Sun)
-  const weekDays = useMemo(() => getWeekDays(), []);
-  
-  // Default to today's offset
-  const todayItem = weekDays.find((d) => d.isToday) || weekDays[0];
-  const [dayOffset, setDayOffset] = useState(todayItem.offset);
+  // Dynamically calculate the real 7 days of this week (Mon-Sun) in useEffect
+  const [weekDays, setWeekDays] = useState([]);
+  const [dayOffset, setDayOffset] = useState(0);
   const [scheduleList, setScheduleList] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchFilter, setSearchFilter] = useState("");
   const [sortBy, setSortBy] = useState("time"); // "time" or "popularity"
 
-  const activeDayObj = weekDays.find((d) => d.offset === dayOffset) || weekDays[0];
+  useEffect(() => {
+    const days = getWeekDays();
+    setWeekDays(days);
+    const today = days.find((d) => d.isToday);
+    if (today) {
+      setDayOffset(today.offset);
+    }
+  }, []);
+
+  const todayItem = useMemo(() => {
+    return weekDays.find((d) => d.isToday) || weekDays[0] || { offset: 0 };
+  }, [weekDays]);
+
+  const activeDayObj = useMemo(() => {
+    return weekDays.find((d) => d.offset === dayOffset) || weekDays[0] || { label: "Schedule", dateFormatted: "" };
+  }, [weekDays, dayOffset]);
 
   useEffect(() => {
     let isCancelled = false;

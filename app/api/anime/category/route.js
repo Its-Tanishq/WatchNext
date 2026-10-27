@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { getCategoryAnime } from "@/utils/anilist";
 
 export async function GET(request) {
+  const { searchParams } = new URL(request.url);
   try {
-    const { searchParams } = new URL(request.url);
     const category = searchParams.get("category") || "trending";
     const page = parseInt(searchParams.get("page") || "1", 10);
     const perPage = parseInt(searchParams.get("perPage") || "21", 10);

@@ -7,8 +7,8 @@ const CACHE_TTL = 1000 * 60 * 15; // 15 minutes
 const MAX_CACHE_SIZE = 250;
 
 export async function GET(request) {
+  const { searchParams } = new URL(request.url);
   try {
-    const { searchParams } = new URL(request.url);
     const q = (searchParams.get("q") || "").trim().toLowerCase();
     const genre = searchParams.get("genre") || null;
     const page = parseInt(searchParams.get("page") || "1", 10);

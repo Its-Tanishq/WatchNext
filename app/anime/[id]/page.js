@@ -2,6 +2,8 @@ import { getAnimeById, getAnimeTitle } from "@/utils/anilist";
 import AnimeDetailsView from "./AnimeDetailsView";
 import Link from "next/link";
 
+export const instant = false;
+
 export async function generateMetadata({ params }) {
   const { id } = await params;
   const anime = await getAnimeById(id);
