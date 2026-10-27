@@ -7,6 +7,21 @@ import { formatScore, getAnimeTitle, formatReleaseDate } from "@/utils/anilist";
 import { createClient } from "@/utils/supabase/client";
 import { fetchSingleLibraryEntry, upsertAnimeToLibrary, updateLibraryEntry } from "@/utils/library";
 import LibraryActionModal from "@/app/components/LibraryActionModal";
+import WatchOptions from "@/app/components/WatchOptions";
+import {
+  Share2,
+  Check,
+  ArrowLeft,
+  Settings,
+  Repeat,
+  Tv,
+  Star,
+  Heart,
+  Trophy,
+  Play,
+  Plus,
+  Minus,
+} from "lucide-react";
 
 export default function AnimeDetailsView({ anime }) {
   const id = anime.id;
@@ -108,7 +123,8 @@ export default function AnimeDetailsView({ anime }) {
       {/* Toast Notification */}
       {showShareToast && (
         <div className="fixed bottom-6 right-6 z-50 bg-[#161d2c] border border-emerald-500/50 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2 animate-fadeIn">
-          <span className="text-emerald-400">✓</span> Link copied to clipboard!
+          <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+          <span>Link copied to clipboard!</span>
         </div>
       )}
 
@@ -120,7 +136,7 @@ export default function AnimeDetailsView({ anime }) {
               href="/"
               className="inline-flex items-center gap-2 text-xs font-semibold text-[#8e9cb9] hover:text-white transition-colors bg-[#111520] border border-[#212739] px-3.5 py-1.5 rounded-xl group"
             >
-              <span className="group-hover:-translate-x-1 transition-transform">←</span>
+              <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-1 transition-transform" />
               <span>Back to Home</span>
             </Link>
 
@@ -137,7 +153,7 @@ export default function AnimeDetailsView({ anime }) {
               onClick={handleShare}
               className="text-xs bg-[#121622] hover:bg-[#1b2234] border border-[#252f44] hover:border-[#ff5238] text-white px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
             >
-              <span>🔗</span>
+              <Share2 className="w-3.5 h-3.5" />
               <span>Share</span>
             </button>
           </div>
@@ -192,6 +208,11 @@ export default function AnimeDetailsView({ anime }) {
               </div>
             </div>
 
+            {/* Direct Stream: Crunchyroll (Official) & HiAnime (Free) */}
+            <div className="bg-[#0e121d] border border-[#20283a] rounded-2xl p-4 shadow-xl">
+              <WatchOptions anime={anime} />
+            </div>
+
             {/* Watchlist Manager Card */}
             <div className="bg-[#0e121d] border border-[#20283a] rounded-2xl p-4 space-y-3.5 shadow-xl">
               <div className="flex items-center justify-between">
@@ -201,9 +222,10 @@ export default function AnimeDetailsView({ anime }) {
                 <button
                   type="button"
                   onClick={() => setShowLibraryModal(true)}
-                  className="text-[11px] text-[#ff5238] hover:underline font-bold cursor-pointer"
+                  className="text-[11px] text-[#ff5238] hover:underline font-bold cursor-pointer inline-flex items-center gap-1"
                 >
-                  Full Edit ⚙️
+                  <span>Full Edit</span>
+                  <Settings className="w-3 h-3" />
                 </button>
               </div>
 
@@ -252,7 +274,7 @@ export default function AnimeDetailsView({ anime }) {
                     className="w-7 h-7 rounded-lg bg-[#151a28] hover:bg-[#20293d] border border-[#252f44] text-white font-bold flex items-center justify-center cursor-pointer"
                     title="Watched -1 episode"
                   >
-                    -
+                    <Minus className="w-3.5 h-3.5" />
                   </button>
                   <button
                     type="button"
@@ -260,7 +282,7 @@ export default function AnimeDetailsView({ anime }) {
                     className="w-7 h-7 rounded-lg bg-[#ff5238] hover:bg-[#ff6850] text-white font-bold flex items-center justify-center cursor-pointer shadow-md shadow-[#ff5238]/25"
                     title="Watched +1 episode"
                   >
-                    +
+                    <Plus className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>
@@ -270,7 +292,8 @@ export default function AnimeDetailsView({ anime }) {
                 <div className="pt-2 border-t border-[#192132] space-y-1 text-[11px]">
                   {libraryEntry?.rewatch_counter > 0 && (
                     <p className="text-amber-400 font-semibold flex items-center gap-1">
-                      <span>🔁</span> Rewatched {libraryEntry.rewatch_counter}x
+                      <Repeat className="w-3 h-3 text-amber-400 shrink-0" />
+                      <span>Rewatched {libraryEntry.rewatch_counter}x</span>
                     </p>
                   )}
                   {libraryEntry?.custom_lists?.length > 0 && (
@@ -324,7 +347,8 @@ export default function AnimeDetailsView({ anime }) {
             {anime.externalLinks?.length > 0 && (
               <div className="bg-[#0e121d] border border-[#20283a] rounded-2xl p-4 space-y-2.5">
                 <h3 className="text-[11px] font-bold uppercase tracking-wider text-[#7988a8] flex items-center gap-1.5">
-                  <span>📺</span> Official Streaming Platforms
+                  <Tv className="w-3.5 h-3.5 text-[#7988a8]" />
+                  <span>Official Streaming Platforms</span>
                 </h3>
                 <div className="flex flex-wrap gap-2 pt-1">
                   {anime.externalLinks
@@ -338,7 +362,7 @@ export default function AnimeDetailsView({ anime }) {
                         rel="noopener noreferrer"
                         className="bg-[#141825] hover:bg-[#ff5238] text-white hover:text-white border border-[#252f44] text-[11px] font-semibold px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5"
                       >
-                        <span>▶</span>
+                        <Play className="w-2.5 h-2.5 text-white fill-white" />
                         <span>{link.site}</span>
                       </a>
                     ))}
@@ -353,8 +377,8 @@ export default function AnimeDetailsView({ anime }) {
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 {score !== "N/A" && (
-                  <span className="bg-[#ffb703]/15 border border-[#ffb703]/30 text-[#ffb703] font-bold px-3 py-1 rounded-full flex items-center gap-1">
-                    <span>★</span>
+                  <span className="bg-[#ffb703]/15 border border-[#ffb703]/30 text-[#ffb703] font-bold px-3 py-1 rounded-full flex items-center gap-1.5">
+                    <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
                     <span>{score}</span>
                     <span className="text-[#ffb703]/70 font-normal text-[10px]">/ 10</span>
                   </span>
@@ -365,8 +389,9 @@ export default function AnimeDetailsView({ anime }) {
                   </span>
                 )}
                 {anime.favourites && (
-                  <span className="bg-[#141824] border border-[#242f44] text-[#8e9cb8] px-2.5 py-1 rounded-full text-[11px]">
-                    ❤️ {anime.favourites.toLocaleString()} Favourites
+                  <span className="bg-[#141824] border border-[#242f44] text-[#8e9cb8] px-2.5 py-1 rounded-full text-[11px] flex items-center gap-1.5">
+                    <Heart className="w-3 h-3 text-rose-500 fill-rose-500" />
+                    <span>{anime.favourites.toLocaleString()} Favourites</span>
                   </span>
                 )}
               </div>
@@ -390,7 +415,7 @@ export default function AnimeDetailsView({ anime }) {
                     key={r.id}
                     className="bg-gradient-to-r from-amber-500/10 to-transparent border border-amber-500/30 text-amber-300 text-xs font-semibold px-3 py-1 rounded-xl flex items-center gap-1.5"
                   >
-                    <span>🏆</span>
+                    <Trophy className="w-3.5 h-3.5 text-amber-400" />
                     <span>
                       #{r.rank} {r.context}
                     </span>
@@ -564,8 +589,9 @@ export default function AnimeDetailsView({ anime }) {
                             className="object-cover group-hover:scale-105 transition-transform"
                           />
                           {rMedia.averageScore && (
-                            <span className="absolute top-1.5 right-1.5 bg-black/75 text-[#ffb703] text-[9px] font-bold px-1.5 py-0.5 rounded">
-                              ★ {formatScore(rMedia.averageScore)}
+                            <span className="absolute top-1.5 right-1.5 bg-black/75 text-[#ffb703] text-[9px] font-bold px-1.5 py-0.5 rounded flex items-center gap-1">
+                              <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-400" />
+                              <span>{formatScore(rMedia.averageScore)}</span>
                             </span>
                           )}
                         </div>

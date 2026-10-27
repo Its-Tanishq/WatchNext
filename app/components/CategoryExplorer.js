@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import AnimeCard from "./AnimeCard";
 import { formatReleaseDate } from "@/utils/anilist";
+import { Calendar, Film, Snowflake, ArrowLeft } from "lucide-react";
 
 const GENRES = [
   "All",
@@ -18,10 +19,10 @@ const GENRES = [
 ];
 
 const UPCOMING_STATUS_FILTERS = [
-  { id: "all", label: "All Upcoming" },
-  { id: "confirmed", label: "🟢 Confirmed Dates Only" },
-  { id: "winter2027", label: "❄️ Winter 2027" },
-  { id: "movies", label: "🎬 Movies & Theatrical" },
+  { id: "all", label: "All Upcoming", icon: null },
+  { id: "confirmed", label: "Confirmed Dates Only", icon: "dot" },
+  { id: "winter2027", label: "Winter 2027", icon: "snow" },
+  { id: "movies", label: "Movies & Theatrical", icon: "film" },
 ];
 
 export default function CategoryExplorer({
@@ -133,7 +134,7 @@ export default function CategoryExplorer({
             onClick={onBackToHome}
             className="inline-flex items-center gap-1.5 text-xs text-[#8f9ebf] hover:text-[#ff5238] font-semibold mb-2 transition-colors cursor-pointer group"
           >
-            <span className="group-hover:-translate-x-1 transition-transform">←</span>
+            <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-1 transition-transform" />
             <span>Back to Curated Home</span>
           </button>
           <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
@@ -152,8 +153,9 @@ export default function CategoryExplorer({
       {/* Special Upcoming Release Date Filter Bar (Only for upcoming) */}
       {categoryKey === "upcoming" && (
         <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none bg-[#0e121c] p-2.5 rounded-2xl border border-[#1f2638]">
-          <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider pr-1 shrink-0 flex items-center gap-1">
-            <span>📅</span> Release Status:
+          <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider pr-1 shrink-0 flex items-center gap-1.5">
+            <Calendar className="w-3.5 h-3.5" />
+            <span>Release Status:</span>
           </span>
           {UPCOMING_STATUS_FILTERS.map((f) => {
             const isSelected = upcomingFilter === f.id;
@@ -162,13 +164,16 @@ export default function CategoryExplorer({
                 key={f.id}
                 type="button"
                 onClick={() => setUpcomingFilter(f.id)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
                   isSelected
                     ? "bg-emerald-500 text-black font-black shadow-md shadow-emerald-500/25"
                     : "bg-[#141824] border border-[#252e42] text-[#8e9cb8] hover:text-white"
                 }`}
               >
-                {f.label}
+                {f.icon === "dot" && <span className="w-2 h-2 rounded-full bg-emerald-400"></span>}
+                {f.icon === "snow" && <Snowflake className="w-3.5 h-3.5 text-blue-400" />}
+                {f.icon === "film" && <Film className="w-3.5 h-3.5 text-amber-400" />}
+                <span>{f.label}</span>
               </button>
             );
           })}

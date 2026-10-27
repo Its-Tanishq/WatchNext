@@ -667,3 +667,359 @@ export async function getCategoryAnime({
     genre: genre || "All",
   };
 }
+
+/**
+ * 11. Upcoming Sequels & Release Radar for user library anime
+ * Queries relations of user's tracked anime to detect unreleased sequels, movies, and spin-offs.
+ */
+export async function getUpcomingRadarForAnimeList(animeIds = []) {
+  if (!Array.isArray(animeIds) || animeIds.length === 0) return [];
+
+  // Limit to first 40 unique IDs to prevent overly huge queries
+  const cleanIds = Array.from(new Set(animeIds.map(Number).filter((n) => !isNaN(n) && n > 0))).slice(0, 40);
+  if (cleanIds.length === 0) return [];
+
+  const query = `
+    query GetRadarRelations($ids: [Int]) {
+      Page(page: 1, perPage: 50) {
+        media(id_in: $ids, type: ANIME) {
+          id
+          type
+          format
+          status
+          season
+          seasonYear
+          title {
+            english
+            romaji
+            native
+          }
+          coverImage {
+            extraLarge
+            large
+            medium
+            color
+          }
+          bannerImage
+          description(asHtml: false)
+          episodes
+          averageScore
+          nextAiringEpisode {
+            episode
+            airingAt
+            timeUntilAiring
+          }
+          startDate {
+            year
+            month
+            day
+          }
+          studios(isMain: true) {
+            nodes {
+              name
+            }
+          }
+          relations {
+            edges {
+              relationType
+              node {
+                id
+                type
+                format
+                status
+                season
+                seasonYear
+                title {
+                  english
+                  romaji
+                  native
+                }
+                coverImage {
+                  extraLarge
+                  large
+                  medium
+                  color
+                }
+                bannerImage
+                description(asHtml: false)
+                episodes
+                averageScore
+                nextAiringEpisode {
+                  episode
+                  airingAt
+                  timeUntilAiring
+                }
+                startDate {
+                  year
+                  month
+                  day
+                }
+                studios(isMain: true) {
+                  nodes {
+                    name
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const data = await fetchAniList(query, { ids: cleanIds }, 600);
+  const mediaList = data?.Page?.media || [];
+
+  const validRelationTypes = ["SEQUEL", "PREQUEL", "SIDE_STORY", "SPIN_OFF", "ALTERNATIVE"];
+  const seenIds = new Set();
+  const results = [];
+  const nowMs = Date.now();
+
+  function processNode(node, relationType, parentTitle) {
+    if (!node || node.type !== "ANIME") return;
+    const isUnreleased = node.status === "NOT_YET_RELEASED";
+    const isReleasingWithNext = node.status === "RELEASING" && node.nextAiringEpisode;
+
+    if (!isUnreleased && !isReleasingWithNext) return;
+    if (seenIds.has(node.id)) return;
+    seenIds.add(node.id);
+
+    let targetTimestamp = null;
+    let datePrecision = "tba";
+
+    if (node.nextAiringEpisode?.airingAt) {
+      targetTimestamp = node.nextAiringEpisode.airingAt * 1000;
+      datePrecision = "exact";
+    } else if (node.startDate?.year && node.startDate?.month) {
+      const day = node.startDate.day || 1;
+      targetTimestamp = new Date(node.startDate.year, node.startDate.month - 1, day).getTime();
+      datePrecision = node.startDate.day ? "exact" : "month";
+    } else if (node.season && node.seasonYear) {
+      const seasonMonths = { WINTER: 0, SPRING: 3, SUMMER: 6, FALL: 9 };
+      const month = seasonMonths[node.season] ?? 0;
+      targetTimestamp = new Date(node.seasonYear, month, 1).getTime();
+      datePrecision = "season";
+    }
+
+    let urgency = "ANNOUNCED_TBA";
+    let urgencyLabel = "Announced / TBA";
+    let urgencyColor = "#8e9cb8";
+
+    if (targetTimestamp && targetTimestamp > nowMs) {
+      const diffDays = Math.ceil((targetTimestamp - nowMs) / (1000 * 60 * 60 * 24));
+      if (diffDays <= 7) {
+        urgency = "AIRING_WEEK";
+        urgencyLabel = diffDays <= 1 ? "Airing Today / Tomorrow!" : `Airing in ${diffDays} Days`;
+        urgencyColor = "#ef4444";
+      } else if (diffDays <= 30) {
+        urgency = "AIRING_MONTH";
+        urgencyLabel = `Airing in ${diffDays} Days`;
+        urgencyColor = "#f59e0b";
+      } else {
+        urgency = "UPCOMING_SEASON";
+        urgencyLabel = node.season && node.seasonYear ? `${node.season} ${node.seasonYear}` : `Releasing in ${Math.round(diffDays / 30)} Months`;
+        urgencyColor = "#3b82f6";
+      }
+    } else if (node.seasonYear) {
+      urgency = "UPCOMING_SEASON";
+      urgencyLabel = node.season ? `${node.season} ${node.seasonYear}` : `${node.seasonYear}`;
+      urgencyColor = "#8b5cf6";
+    }
+
+    let relationBadge = "Upcoming Sequel";
+    if (relationType === "SELF") relationBadge = "In Your Library";
+    else if (relationType === "SEQUEL") relationBadge = "Sequel";
+    else if (relationType === "SIDE_STORY") relationBadge = "Side Story";
+    else if (relationType === "SPIN_OFF") relationBadge = "Spin-Off";
+    else if (relationType === "ALTERNATIVE") relationBadge = "Alternative Version";
+    else if (relationType === "PREQUEL") relationBadge = "Prequel";
+
+    results.push({
+      id: node.id,
+      title: node.title,
+      coverImage: node.coverImage,
+      bannerImage: node.bannerImage,
+      description: node.description,
+      format: node.format,
+      status: node.status,
+      episodes: node.episodes,
+      nextAiringEpisode: node.nextAiringEpisode,
+      startDate: node.startDate,
+      season: node.season,
+      seasonYear: node.seasonYear,
+      studios: node.studios?.nodes?.map((s) => s.name) || [],
+      parentAnimeTitle: parentTitle || (node.title?.english || node.title?.romaji || "Anime"),
+      relationType: relationType || "SELF",
+      relationBadge,
+      targetTimestamp,
+      datePrecision,
+      urgency,
+      urgencyLabel,
+      urgencyColor,
+    });
+  }
+
+  for (const parent of mediaList) {
+    const parentTitle = parent.title?.english || parent.title?.romaji || parent.title?.native || "Anime";
+
+    // 1. If the parent anime itself in user's library is unreleased / upcoming, keep it in radar!
+    processNode(parent, "SELF", parentTitle);
+
+    // 2. Process all upcoming relations (sequels, movies, spin-offs)
+    const edges = parent.relations?.edges || [];
+    for (const edge of edges) {
+      if (!validRelationTypes.includes(edge.relationType)) continue;
+      processNode(edge.node, edge.relationType, parentTitle);
+    }
+  }
+
+  results.sort((a, b) => {
+    if (a.targetTimestamp && b.targetTimestamp) return a.targetTimestamp - b.targetTimestamp;
+    if (a.targetTimestamp) return -1;
+    if (b.targetTimestamp) return 1;
+    if (a.seasonYear && b.seasonYear) return a.seasonYear - b.seasonYear;
+    return 0;
+  });
+
+  return results;
+}
+
+/**
+ * 12. Personalized Watchlist Recommendations
+ * Fetches AniList community recommendations based on a user's seed anime.
+ */
+export async function getPersonalizedRecommendations(seedIds = [], excludeIds = []) {
+  const DEFAULT_GATEWAY_SEEDS = [16498, 154587, 113415, 5114]; // Attack on Titan, Frieren, Jujutsu Kaisen, FMAB
+  const isGuestMode = !seedIds || seedIds.length === 0;
+  const activeSeedIds = (isGuestMode ? DEFAULT_GATEWAY_SEEDS : seedIds.slice(0, 5)).map(Number).filter(Boolean);
+
+  if (activeSeedIds.length === 0) {
+    return { isGuestMode: true, seeds: [], combined: [] };
+  }
+
+  // Construct dynamic aliased GraphQL query
+  const queryFields = activeSeedIds.map((id, index) => `
+    seed_${index}: Media(id: ${id}) {
+      id
+      title {
+        english
+        romaji
+        native
+      }
+      coverImage {
+        large
+        medium
+      }
+      recommendations(page: 1, perPage: 12, sort: [RATING_DESC]) {
+        nodes {
+          rating
+          userRating
+          mediaRecommendation {
+            id
+            title {
+              english
+              romaji
+              native
+            }
+            coverImage {
+              extraLarge
+              large
+              medium
+              color
+            }
+            bannerImage
+            description(asHtml: false)
+            averageScore
+            popularity
+            format
+            status
+            episodes
+            season
+            seasonYear
+            genres
+            studios(isMain: true) {
+              nodes {
+                name
+              }
+            }
+            externalLinks {
+              id
+              site
+              url
+              icon
+              color
+              type
+            }
+          }
+        }
+      }
+    }
+  `).join("\n");
+
+  const fullQuery = `query GetPersonalizedRecs {\n${queryFields}\n}`;
+
+  const data = await fetchAniList(fullQuery, {}, 1800);
+  if (!data) {
+    return { isGuestMode, seeds: [], combined: [] };
+  }
+
+  const excludeSet = new Set([
+    ...activeSeedIds,
+    ...excludeIds.map(Number),
+  ]);
+
+  const seeds = [];
+  const seenRecommendationIds = new Set();
+  const allRecommendations = [];
+
+  for (let i = 0; i < activeSeedIds.length; i++) {
+    const rawSeed = data[`seed_${i}`];
+    if (!rawSeed) continue;
+
+    const seedRecs = [];
+    const rawNodes = rawSeed.recommendations?.nodes || [];
+
+    for (const node of rawNodes) {
+      const rec = node.mediaRecommendation;
+      if (!rec || !rec.id) continue;
+      if (excludeSet.has(rec.id)) continue;
+
+      seedRecs.push({
+        ...rec,
+        recRating: node.rating || 0,
+      });
+
+      if (!seenRecommendationIds.has(rec.id)) {
+        seenRecommendationIds.add(rec.id);
+        allRecommendations.push({
+          ...rec,
+          recRating: node.rating || 0,
+          matchedSeedTitle: rawSeed.title?.english || rawSeed.title?.romaji || "Anime",
+          matchedSeedId: rawSeed.id,
+        });
+      }
+    }
+
+    seeds.push({
+      id: rawSeed.id,
+      title: rawSeed.title,
+      coverImage: rawSeed.coverImage,
+      recommendations: seedRecs,
+    });
+  }
+
+  allRecommendations.sort((a, b) => {
+    const scoreA = a.averageScore || 0;
+    const scoreB = b.averageScore || 0;
+    if (scoreB !== scoreA) return scoreB - scoreA;
+    return (b.recRating || 0) - (a.recRating || 0);
+  });
+
+  return {
+    isGuestMode,
+    seeds,
+    combined: allRecommendations,
+  };
+}
+
+

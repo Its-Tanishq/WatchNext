@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/utils/supabase/client";
+import { Star } from "lucide-react";
 
 export default function AuthPage({ initialMode = "register" }) {
   const router = useRouter();
@@ -655,7 +656,7 @@ export default function AuthPage({ initialMode = "register" }) {
                     <div className="absolute bottom-2 left-2 right-2 flex flex-col">
                       <span className="text-white text-xs font-semibold truncate leading-tight">{anime.title}</span>
                       <div className="flex items-center gap-1 mt-0.5">
-                        <span className="text-[#ffb703] text-[10px]">★</span>
+                        <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-400" />
                         <span className="text-[#d1d7e5] text-[11px] font-medium">{anime.rating}</span>
                       </div>
                     </div>

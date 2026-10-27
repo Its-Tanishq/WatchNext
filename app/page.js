@@ -8,7 +8,9 @@ import AnimeCard from "./components/AnimeCard";
 import AnimeDetailModal from "./components/AnimeDetailModal";
 import CategoryExplorer from "./components/CategoryExplorer";
 import ScheduleExplorer from "./components/ScheduleExplorer";
+import WatchlistRecommendations from "./components/WatchlistRecommendations";
 import { formatScore, getAnimeTitle, getWeekDays } from "@/utils/anilist";
+import { Library, Star, Flame, Calendar, ArrowRight, X } from "lucide-react";
 
 export default function HomePage() {
   // Navigation & Category States
@@ -283,7 +285,7 @@ export default function HomePage() {
                 href="/library"
                 className="ml-1 px-3.5 py-1.5 rounded-full font-bold bg-[#151a28] hover:bg-[#ff5238] border border-[#273248] hover:border-[#ff5238] text-[#ff6750] hover:text-white transition-all flex items-center gap-1.5 shadow-sm"
               >
-                <span>📚</span>
+                <Library className="w-3.5 h-3.5" />
                 <span>Library</span>
               </Link>
             </nav>
@@ -321,7 +323,7 @@ export default function HomePage() {
                   onClick={() => setSearchQuery("")}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-[#717e9c] hover:text-white"
                 >
-                  ✕
+                  <X className="w-3.5 h-3.5" />
                 </button>
               ) : (
                 <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] bg-[#1a1f2e] border border-[#273047] text-[#6d7b9c] px-1.5 py-0.5 rounded font-mono">
@@ -371,8 +373,9 @@ export default function HomePage() {
                             </p>
                           </div>
                           {item.averageScore && (
-                            <span className="text-[10px] font-bold text-[#ffb703] bg-[#1a2030] px-2 py-0.5 rounded border border-[#2b354e] shrink-0">
-                              ★ {formatScore(item.averageScore)}
+                            <span className="text-[10px] font-bold text-[#ffb703] bg-[#1a2030] px-2 py-0.5 rounded border border-[#2b354e] shrink-0 flex items-center gap-1">
+                              <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-400" />
+                              <span>{formatScore(item.averageScore)}</span>
                             </span>
                           )}
                         </div>
@@ -423,7 +426,7 @@ export default function HomePage() {
 
                   {showUserMenu && (
                     <div className="absolute right-0 mt-2 w-48 bg-[#10141f] border border-[#242b3e] rounded-xl shadow-2xl py-1.5 z-50 animate-fadeIn">
-                      <div className="px-3.5 py-2 border-b border-[#1b2233]">
+                      <div className="px-3.5 py-2 border-b border-[#1b2234]">
                         <p className="text-[11px] text-[#7886a3]">Signed in as</p>
                         <p className="text-xs font-semibold text-white truncate">{user.email}</p>
                       </div>
@@ -432,7 +435,7 @@ export default function HomePage() {
                         onClick={() => setShowUserMenu(false)}
                         className="flex items-center gap-2 px-3.5 py-2 text-xs text-[#a0acc7] hover:text-white hover:bg-[#181f30] transition-colors"
                       >
-                        <span>📚</span>
+                        <Library className="w-3.5 h-3.5" />
                         <span>Personal Anime Library</span>
                       </Link>
                       <button
@@ -494,7 +497,7 @@ export default function HomePage() {
               href="/library"
               className="px-4 py-2 rounded-full font-bold whitespace-nowrap transition-all bg-[#171d2b] border border-[#ff5238]/40 text-[#ff6750] flex items-center gap-1.5"
             >
-              <span>📚</span>
+              <Library className="w-3.5 h-3.5" />
               <span>Library</span>
             </Link>
           </div>
@@ -614,7 +617,8 @@ export default function HomePage() {
                       {/* Badges */}
                       <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
                         <span className="bg-[#ff5238] text-white px-3 py-1 rounded-full shadow-lg shadow-[#ff5238]/30 flex items-center gap-1.5">
-                          <span>🔥</span> #{heroIndex + 1} Trending on AniList
+                          <Flame className="w-3.5 h-3.5" />
+                          <span>#{heroIndex + 1} Trending on AniList</span>
                         </span>
                         <span className="bg-[#141824]/80 backdrop-blur-md border border-[#2b3348] text-white/90 px-3 py-1 rounded-full">
                           {heroAnime.season} {heroAnime.seasonYear || ""} • {heroAnime.format || "TV"}
@@ -639,8 +643,8 @@ export default function HomePage() {
 
                       {/* Metadata & Genres */}
                       <div className="flex flex-wrap items-center gap-2.5 text-xs text-[#95a3c2] pt-1">
-                        <div className="flex items-center gap-1 text-[#ffb703] font-bold bg-[#151926] px-2.5 py-1 rounded-lg border border-[#252d42]">
-                          <span>★</span>
+                        <div className="flex items-center gap-1.5 text-[#ffb703] font-bold bg-[#151926] px-2.5 py-1 rounded-lg border border-[#252d42]">
+                          <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
                           <span className="text-white">{heroScore}</span>
                           <span className="text-[#6d7994] font-normal">/ 10</span>
                         </div>
@@ -701,6 +705,9 @@ export default function HomePage() {
                 </>
               ) : null}
             </section>
+
+            {/* ================= WATCHLIST RECOMMENDATIONS (CRUNCHYROLL-STYLE) ================= */}
+            <WatchlistRecommendations onSelectAnime={setSelectedAnime} />
 
             {/* ================= TRENDING NOW ================= */}
             <section id="trending" className="space-y-4">
@@ -779,8 +786,9 @@ export default function HomePage() {
                     onClick={() => switchCategory("Schedule")}
                     className="inline-flex items-center gap-1.5 text-xs text-[#a2b0ce] hover:text-[#ff5238] font-semibold pt-2 cursor-pointer transition-colors"
                   >
-                    <span>📅 Full Weekly Calendar</span>
-                    <span>→</span>
+                    <Calendar className="w-3.5 h-3.5" />
+                    <span>Full Weekly Calendar</span>
+                    <ArrowRight className="w-3 h-3" />
                   </button>
                 </div>
 
@@ -825,10 +833,18 @@ export default function HomePage() {
                           </div>
                           <div className="flex items-center justify-between pt-1">
                             <span className="text-[10px] text-[#8e9bb8]">
-                              {item.media?.averageScore ? `★ ${formatScore(item.media.averageScore)}` : ""}
+                              {item.media?.averageScore ? (
+                                <span className="inline-flex items-center gap-1">
+                                  <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-400 shrink-0" />
+                                  <span>{formatScore(item.media.averageScore)}</span>
+                                </span>
+                              ) : (
+                                ""
+                              )}
                             </span>
-                            <span className="text-[10px] text-cyan-400 font-semibold group-hover:underline">
-                              View Show →
+                            <span className="text-[10px] text-cyan-400 font-semibold group-hover:underline inline-flex items-center gap-1">
+                              <span>View Show</span>
+                              <ArrowRight className="w-2.5 h-2.5" />
                             </span>
                           </div>
                         </div>

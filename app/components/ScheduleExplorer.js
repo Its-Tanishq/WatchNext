@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import Image from "next/image";
 import { formatScore, getAnimeTitle, getWeekDays } from "@/utils/anilist";
+import { X, Star, ArrowRight, ArrowLeft } from "lucide-react";
 
 export default function ScheduleExplorer({ onBackToHome, onSelectAnime }) {
   // Dynamically calculate the real 7 days of this week (Mon-Sun)
@@ -99,7 +100,7 @@ export default function ScheduleExplorer({ onBackToHome, onSelectAnime }) {
             onClick={onBackToHome}
             className="inline-flex items-center gap-1.5 text-xs text-[#8f9ebf] hover:text-[#ff5238] font-semibold mb-2 transition-colors cursor-pointer group"
           >
-            <span className="group-hover:-translate-x-1 transition-transform">←</span>
+            <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-1 transition-transform" />
             <span>Back to Curated Home</span>
           </button>
           <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
@@ -178,7 +179,7 @@ export default function ScheduleExplorer({ onBackToHome, onSelectAnime }) {
               onClick={() => setSearchFilter("")}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#717e9c] hover:text-white"
             >
-              ✕
+              <X className="w-3.5 h-3.5" />
             </button>
           )}
         </div>
@@ -284,11 +285,19 @@ export default function ScheduleExplorer({ onBackToHome, onSelectAnime }) {
 
                 {/* Footer details */}
                 <div className="flex items-center justify-between pt-2 border-t border-[#182030] text-[10px]">
-                  <span className="text-[#8795b5]">
-                    {score !== "N/A" ? `★ ${score}` : media?.format || "TV"}
+                  <span className="text-[#8795b5] flex items-center gap-1">
+                    {score !== "N/A" ? (
+                      <>
+                        <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-400 shrink-0" />
+                        <span>{score}</span>
+                      </>
+                    ) : (
+                      media?.format || "TV"
+                    )}
                   </span>
-                  <span className="text-cyan-400 font-semibold group-hover:underline">
-                    View Details →
+                  <span className="text-cyan-400 font-semibold group-hover:underline flex items-center gap-1">
+                    <span>View Details</span>
+                    <ArrowRight className="w-3 h-3" />
                   </span>
                 </div>
               </div>

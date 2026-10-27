@@ -5,6 +5,8 @@ import Image from "next/image";
 import { createClient } from "@/utils/supabase/client";
 import { LIBRARY_STATUSES, fetchSingleLibraryEntry, upsertAnimeToLibrary, deleteLibraryEntry } from "@/utils/library";
 import { getAnimeTitle } from "@/utils/anilist";
+import { X, Star, Lock, Plus, Minus, Check, Trash2, AlertCircle, CheckCircle2 } from "lucide-react";
+import StatusIcon from "./StatusIcon";
 
 export default function LibraryActionModal({ anime, isOpen, onClose, onEntryUpdated }) {
   const [user, setUser] = useState(null);
@@ -170,7 +172,11 @@ export default function LibraryActionModal({ anime, isOpen, onClose, onEntryUpda
               ? "bg-rose-950/90 border-rose-500/50 text-rose-200"
               : "bg-emerald-950/90 border-emerald-500/50 text-emerald-200"
           }`}>
-            <span>{showToast.type === "error" ? "⚠️" : "✓"}</span>
+            {showToast.type === "error" ? (
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+            ) : (
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            )}
             <span className="flex-1">{showToast.message}</span>
           </div>
         )}
@@ -194,9 +200,9 @@ export default function LibraryActionModal({ anime, isOpen, onClose, onEntryUpda
 
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-[#1b2131] hover:bg-[#252d43] text-[#8e9cb9] hover:text-white flex items-center justify-center text-xs font-bold transition-all cursor-pointer shrink-0"
+            className="w-8 h-8 rounded-full bg-[#1b2131] hover:bg-[#252d43] text-[#8e9cb9] hover:text-white flex items-center justify-center transition-all cursor-pointer shrink-0"
           >
-            ✕
+            <X className="w-4 h-4" />
           </button>
         </div>
 
@@ -204,7 +210,7 @@ export default function LibraryActionModal({ anime, isOpen, onClose, onEntryUpda
         <div className="p-6 overflow-y-auto space-y-5 text-xs flex-1 scrollbar-none">
           {!user && (
             <div className="bg-amber-950/40 border border-amber-500/30 rounded-2xl p-3.5 text-amber-200 flex items-start gap-2.5">
-              <span className="text-base">🔒</span>
+              <Lock className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
               <p className="text-[11px] leading-relaxed">
                 You are currently in guest mode. <a href="/signin" className="underline font-bold text-white hover:text-amber-300">Sign in</a> to permanently sync your anime library across all your devices in PostgreSQL.
               </p>
@@ -229,13 +235,13 @@ export default function LibraryActionModal({ anime, isOpen, onClose, onEntryUpda
                     onClick={() => {
                       setStatus(s.id);
                     }}
-                    className={`px-3 py-2.5 rounded-xl border font-semibold text-center transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                    className={`px-3 py-2.5 rounded-xl border font-semibold text-center transition-all cursor-pointer flex items-center justify-center gap-2 ${
                       isSelected
                         ? "bg-[#ff5238] border-[#ff5238] text-white shadow-lg shadow-[#ff5238]/30 font-bold scale-[1.02]"
                         : "bg-[#141825] border-[#232b3e] text-[#8c9bb9] hover:text-white hover:bg-[#1b2234]"
                     }`}
                   >
-                    <span>{s.icon}</span>
+                    <StatusIcon status={s.id} className="w-3.5 h-3.5 shrink-0" />
                     <span>{s.shortLabel}</span>
                   </button>
                 );
@@ -246,9 +252,7 @@ export default function LibraryActionModal({ anime, isOpen, onClose, onEntryUpda
           {/* 2. Favourite Toggle */}
           <div className="flex items-center justify-between bg-[#131724] border border-[#20283a] rounded-2xl p-3.5">
             <div className="flex items-center gap-2.5">
-              <span className={`text-xl transition-transform ${isFavourite ? "scale-125" : "opacity-60"}`}>
-                ⭐
-              </span>
+              <Star className={`w-5 h-5 transition-transform ${isFavourite ? "text-amber-400 fill-amber-400 scale-110" : "text-[#7786a4]"}`} />
               <div>
                 <p className="text-xs font-bold text-white">Add to Favourites</p>
                 <p className="text-[11px] text-[#7786a4]">Pin this anime to your Hall of Fame showcase</p>
@@ -257,13 +261,14 @@ export default function LibraryActionModal({ anime, isOpen, onClose, onEntryUpda
             <button
               type="button"
               onClick={() => setIsFavourite(!isFavourite)}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                 isFavourite
                   ? "bg-amber-400 text-black shadow-md shadow-amber-400/20"
                   : "bg-[#1b2131] text-[#8e9cb9] hover:text-white hover:bg-[#252d43]"
               }`}
             >
-              {isFavourite ? "Favorited ★" : "Favorite"}
+              <Star className={`w-3.5 h-3.5 ${isFavourite ? "fill-black text-black" : ""}`} />
+              <span>{isFavourite ? "Favorited" : "Favorite"}</span>
             </button>
           </div>
 
@@ -281,7 +286,7 @@ export default function LibraryActionModal({ anime, isOpen, onClose, onEntryUpda
                 onClick={() => setRewatchCounter(Math.max(0, rewatchCounter - 1))}
                 className="w-8 h-8 rounded-lg bg-[#1c2334] hover:bg-[#273148] text-white font-bold flex items-center justify-center cursor-pointer transition-colors shrink-0"
               >
-                -
+                <Minus className="w-3.5 h-3.5" />
               </button>
               <input
                 type="number"
@@ -295,7 +300,7 @@ export default function LibraryActionModal({ anime, isOpen, onClose, onEntryUpda
                 onClick={() => setRewatchCounter(rewatchCounter + 1)}
                 className="w-8 h-8 rounded-lg bg-[#1c2334] hover:bg-[#273148] text-white font-bold flex items-center justify-center cursor-pointer transition-colors shrink-0"
               >
-                +
+                <Plus className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
@@ -319,7 +324,7 @@ export default function LibraryActionModal({ anime, isOpen, onClose, onEntryUpda
                         : "bg-[#141825] border-[#232b3e] text-[#8695b3] hover:text-white"
                     }`}
                   >
-                    <span>{isChecked ? "✓" : "+"}</span>
+                    {isChecked ? <Check className="w-3 h-3 text-purple-300" /> : <Plus className="w-3 h-3 text-[#8695b3]" />}
                     <span>{name}</span>
                   </button>
                 );
@@ -373,9 +378,10 @@ export default function LibraryActionModal({ anime, isOpen, onClose, onEntryUpda
               type="button"
               onClick={handleDelete}
               disabled={saving}
-              className="text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 border border-rose-500/30 px-3.5 py-2 rounded-xl transition-all cursor-pointer font-semibold"
+              className="text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 border border-rose-500/30 px-3.5 py-2 rounded-xl transition-all cursor-pointer font-semibold flex items-center gap-1.5"
             >
-              Remove
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Remove</span>
             </button>
           ) : (
             <div />

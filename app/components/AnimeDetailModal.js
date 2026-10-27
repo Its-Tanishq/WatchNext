@@ -7,6 +7,9 @@ import { formatScore, getAnimeTitle, formatReleaseDate } from "@/utils/anilist";
 import { createClient } from "@/utils/supabase/client";
 import { fetchSingleLibraryEntry, STATUS_MAP } from "@/utils/library";
 import LibraryActionModal from "./LibraryActionModal";
+import StatusIcon from "./StatusIcon";
+import WatchOptions from "./WatchOptions";
+import { X, Star, Plus, ArrowRight, Play } from "lucide-react";
 
 export default function AnimeDetailModal({ anime, onClose }) {
   const [libraryEntry, setLibraryEntry] = useState(null);
@@ -54,7 +57,7 @@ export default function AnimeDetailModal({ anime, onClose }) {
             className="absolute top-4 right-4 w-9 h-9 rounded-full bg-black/60 hover:bg-black/80 border border-white/20 text-white flex items-center justify-center text-sm font-bold transition-all cursor-pointer z-10"
             aria-label="Close modal"
           >
-            ✕
+            <X className="w-4 h-4" />
           </button>
 
           {/* Score or Premiere Badge */}
@@ -70,7 +73,7 @@ export default function AnimeDetailModal({ anime, onClose }) {
             </div>
           ) : anime.averageScore ? (
             <div className="absolute bottom-4 left-6 sm:left-8 flex items-center gap-1.5 bg-black/75 backdrop-blur-md border border-[#ffb703]/30 text-[#ffb703] font-bold text-sm px-3 py-1 rounded-full shadow-lg">
-              <span>★</span>
+              <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
               <span className="text-white">{score}</span>
               <span className="text-white/60 text-xs">/ 10</span>
             </div>
@@ -175,6 +178,11 @@ export default function AnimeDetailModal({ anime, onClose }) {
             </div>
           )}
 
+          {/* Where to Watch: Crunchyroll (Official) & HiAnime (Free) */}
+          <div className="pt-2 border-t border-[#1b2234]">
+            <WatchOptions anime={anime} />
+          </div>
+
           {/* Action Buttons */}
           <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-[#1b2234]">
             <button
@@ -186,11 +194,15 @@ export default function AnimeDetailModal({ anime, onClose }) {
                   : "bg-gradient-to-r from-[#ff5238] to-[#ea3a22] hover:from-[#ff674f] hover:to-[#f24730] text-white shadow-[#ff5238]/25"
               }`}
             >
-              <span>{libraryEntry ? (STATUS_MAP[libraryEntry.status]?.icon || "📚") : "+"}</span>
+              {libraryEntry ? (
+                <StatusIcon status={libraryEntry.status} className="w-3.5 h-3.5" />
+              ) : (
+                <Plus className="w-3.5 h-3.5" />
+              )}
               <span>
                 {libraryEntry
                   ? `${STATUS_MAP[libraryEntry.status]?.label || "In Library"}${libraryEntry.episodes_watched ? ` (${libraryEntry.episodes_watched} eps)` : ""}`
-                  : "+ Add to Library"}
+                  : "Add to Library"}
               </span>
             </button>
 
@@ -198,7 +210,8 @@ export default function AnimeDetailModal({ anime, onClose }) {
               href={`/anime/${anime.id}`}
               className="bg-white text-black hover:bg-white/90 font-bold text-xs px-4 py-2.5 rounded-xl transition-all flex items-center gap-1.5 shadow-md"
             >
-              <span>Full Details →</span>
+              <span>Full Details</span>
+              <ArrowRight className="w-3.5 h-3.5" />
             </Link>
 
             {trailerUrl && (
@@ -208,7 +221,7 @@ export default function AnimeDetailModal({ anime, onClose }) {
                 rel="noopener noreferrer"
                 className="bg-[#171c2a] hover:bg-[#20273a] text-white font-semibold text-xs px-4 py-2.5 rounded-xl border border-[#2a344c] flex items-center gap-2 transition-colors"
               >
-                <span className="text-red-400">▶</span>
+                <Play className="w-3 h-3 text-red-500 fill-red-500" />
                 <span>Watch Trailer</span>
               </a>
             )}

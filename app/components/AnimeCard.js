@@ -2,10 +2,13 @@
 
 import Image from "next/image";
 import { formatScore, getAnimeTitle, formatReleaseDate } from "@/utils/anilist";
+import { getStreamingLinks } from "@/utils/streaming";
+import { Calendar, Clock, Star, ExternalLink } from "lucide-react";
 
 export default function AnimeCard({ anime, rank, badge, onClick }) {
   if (!anime) return null;
 
+  const links = getStreamingLinks(anime);
   const title = getAnimeTitle(anime.title);
   const score = formatScore(anime.averageScore);
   const isUpcoming = anime.status === "NOT_YET_RELEASED";
@@ -39,19 +42,24 @@ export default function AnimeCard({ anime, rank, badge, onClick }) {
         {/* Top Badges */}
         <div className="absolute top-2 left-2 right-2 flex items-center justify-between gap-1">
           {isUpcoming ? (
-            <span className={`backdrop-blur-md border text-[10px] font-bold px-2 py-0.5 rounded-md shadow-sm flex items-center gap-1 ${
+            <span className={`backdrop-blur-md border text-[10px] font-bold px-2 py-0.5 rounded-md shadow-sm flex items-center gap-1.5 ${
               releaseInfo.type === "exact"
-                ? "bg-emerald-950/85 border-emerald-500/40 text-emerald-400"
-                : releaseInfo.type === "season" || releaseInfo.type === "month"
-                ? "bg-cyan-950/85 border-cyan-500/40 text-cyan-300"
-                : "bg-black/80 border-white/10 text-white/70"
+                 ? "bg-emerald-950/85 border-emerald-500/40 text-emerald-400"
+                 : releaseInfo.type === "season" || releaseInfo.type === "month"
+                 ? "bg-cyan-950/85 border-cyan-500/40 text-cyan-300"
+                 : "bg-black/80 border-white/10 text-white/70"
             }`}>
-              <span>{releaseInfo.type === "exact" ? "📅" : "⏳"}</span>
+              {releaseInfo.type === "exact" ? (
+                <Calendar className="w-3 h-3 text-emerald-400 shrink-0" />
+              ) : (
+                <Clock className="w-3 h-3 text-cyan-300 shrink-0" />
+              )}
               <span>{releaseInfo.countdown || releaseInfo.label}</span>
             </span>
           ) : score !== "N/A" ? (
             <span className="bg-[#0b0e16]/85 backdrop-blur-md border border-white/10 text-white text-[10px] font-bold px-2 py-0.5 rounded-md shadow-sm flex items-center gap-1">
-              <span className="text-[#ffb703]">★</span> {score}
+              <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-400 shrink-0" />
+              <span>{score}</span>
             </span>
           ) : (
             <span></span>
@@ -70,6 +78,32 @@ export default function AnimeCard({ anime, rank, badge, onClick }) {
             {rank}
           </span>
         )}
+
+        {/* Quick Hover Stream Options */}
+        <div className="absolute inset-x-2 bottom-2 z-20 opacity-0 group-hover:opacity-100 transition-all duration-200 flex items-center justify-center gap-1.5 backdrop-blur-md bg-black/90 p-1.5 rounded-xl border border-white/20 shadow-2xl">
+          <a
+            href={links.crunchyroll.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="flex-1 py-1 bg-[#f47521] hover:bg-[#ff8533] text-white text-[10px] font-black rounded-lg text-center transition-all active:scale-95 shadow-sm flex items-center justify-center gap-1"
+            title="Watch on Crunchyroll (Official)"
+          >
+            <span>CR</span>
+            <ExternalLink className="w-2.5 h-2.5" />
+          </a>
+          <a
+            href={links.hianime.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="flex-1 py-1 bg-[#5c67f5] hover:bg-[#727dff] text-white text-[10px] font-black rounded-lg text-center transition-all active:scale-95 shadow-sm flex items-center justify-center gap-1"
+            title="Watch Free on HiAnime"
+          >
+            <span>HiAnime</span>
+            <ExternalLink className="w-2.5 h-2.5" />
+          </a>
+        </div>
       </div>
 
       {/* Details */}

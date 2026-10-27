@@ -15,6 +15,31 @@ import {
   upsertAnimeToLibrary,
 } from "@/utils/library";
 import LibraryActionModal from "@/app/components/LibraryActionModal";
+import RadarCountdown from "@/app/components/RadarCountdown";
+import AnimeDetailModal from "@/app/components/AnimeDetailModal";
+import StatusIcon from "@/app/components/StatusIcon";
+import WatchOptions from "@/app/components/WatchOptions";
+import { getAnimeTitle } from "@/utils/anilist";
+import {
+  Library as LibraryIcon,
+  Star,
+  Radio,
+  SlidersHorizontal,
+  RotateCw,
+  Trash2,
+  Film,
+  Zap,
+  Tv,
+  Check,
+  CheckCircle2,
+  AlertCircle,
+  Lock,
+  Plus,
+  ArrowRight,
+  ArrowLeft,
+  X,
+  Repeat,
+} from "lucide-react";
 
 export default function LibraryPage() {
   const [user, setUser] = useState(null);
@@ -39,6 +64,12 @@ export default function LibraryPage() {
   // Modal edit single entry
   const [editingAnime, setEditingAnime] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // Release Radar States
+  const [radarItems, setRadarItems] = useState([]);
+  const [isRadarLoading, setIsRadarLoading] = useState(false);
+  const [radarFilter, setRadarFilter] = useState("ALL"); // "ALL", "AIRING_WEEK", "AIRING_MONTH", "UPCOMING_SEASON", "ANNOUNCED_TBA"
+  const [detailModalAnime, setDetailModalAnime] = useState(null);
 
   // Notification Toast
   const [toast, setToast] = useState(null);
@@ -116,6 +147,63 @@ export default function LibraryPage() {
       authListener?.subscription?.unsubscribe();
     };
   }, [loadData]);
+
+  // Fetch Release Radar Sequels whenever library updates
+  useEffect(() => {
+    if (!library || library.length === 0) return;
+
+    let isMounted = true;
+    const animeIds = library.map((item) => item.anime_id);
+
+    async function fetchRadar() {
+      try {
+        setIsRadarLoading(true);
+        const res = await fetch("/api/anime/radar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ animeIds }),
+        });
+        const data = await res.json();
+        if (isMounted && data?.success) {
+          setRadarItems(data.radar || []);
+        }
+      } catch (err) {
+        console.error("Error fetching radar:", err);
+      } finally {
+        if (isMounted) setIsRadarLoading(false);
+      }
+    }
+
+    fetchRadar();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [library]);
+
+  const handleAddRadarAnimeToLibrary = async (radarAnime) => {
+    if (!user) {
+      showToastMsg("Please sign in to add anime to your library", "error");
+      return;
+    }
+
+    const supabase = createClient();
+    const { data, error } = await upsertAnimeToLibrary(supabase, radarAnime, {
+      status: "PLANNING",
+      custom_lists: ["Radar Tracked"],
+    });
+
+    if (error) {
+      showToastMsg("Failed to add anime: " + error.message, "error");
+    } else {
+      const displayTitle = getAnimeTitle(radarAnime.title);
+      showToastMsg(`Added "${displayTitle}" to Plan to Watch!`);
+      setLibrary((prev) => {
+        const filtered = prev.filter((item) => item.anime_id !== radarAnime.id);
+        return [data, ...filtered];
+      });
+    }
+  };
 
   // Compute available custom lists in the user's library
   const userCustomLists = useMemo(() => {
@@ -208,6 +296,26 @@ export default function LibraryPage() {
 
     return result;
   }, [library, activeTab, selectedCustomList, formatFilter, searchQuery, sortBy]);
+
+  // Radar Statistics & Filtered Radar Items
+  const radarStats = useMemo(() => {
+    let week = 0;
+    let month = 0;
+    let season = 0;
+    let tba = 0;
+    radarItems.forEach((item) => {
+      if (item.urgency === "AIRING_WEEK") week++;
+      else if (item.urgency === "AIRING_MONTH") month++;
+      else if (item.urgency === "UPCOMING_SEASON") season++;
+      else if (item.urgency === "ANNOUNCED_TBA") tba++;
+    });
+    return { week, month, season, tba };
+  }, [radarItems]);
+
+  const filteredRadarItems = useMemo(() => {
+    if (radarFilter === "ALL") return radarItems;
+    return radarItems.filter((item) => item.urgency === radarFilter);
+  }, [radarItems, radarFilter]);
 
   // Bulk Selection Handlers
   const toggleSelectAll = () => {
@@ -364,7 +472,11 @@ export default function LibraryPage() {
             ? "bg-rose-950/90 border-rose-500/50 text-rose-200"
             : "bg-emerald-950/90 border-emerald-500/50 text-emerald-200"
         }`}>
-          <span>{toast.type === "error" ? "⚠️" : "✓"}</span>
+          {toast.type === "error" ? (
+            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+          ) : (
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          )}
           <span>{toast.message}</span>
         </div>
       )}
@@ -377,7 +489,7 @@ export default function LibraryPage() {
               href="/"
               className="inline-flex items-center gap-2 text-xs font-semibold text-[#8e9cb9] hover:text-white transition-colors bg-[#111520] border border-[#212739] px-3.5 py-1.5 rounded-xl group"
             >
-              <span className="group-hover:-translate-x-1 transition-transform">←</span>
+              <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-1 transition-transform" />
               <span>Back to Home</span>
             </Link>
 
@@ -445,7 +557,17 @@ export default function LibraryPage() {
                     : "bg-[#161c2a] border-[#29344c] text-[#a0acc7] hover:text-white hover:bg-[#1f2638]"
                 }`}
               >
-                <span>{isBulkMode ? "✓ Done Editing" : "⚡ Bulk Edit Entries"}</span>
+                {isBulkMode ? (
+                  <>
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Done Editing</span>
+                  </>
+                ) : (
+                  <>
+                    <SlidersHorizontal className="w-3.5 h-3.5" />
+                    <span>Bulk Edit Entries</span>
+                  </>
+                )}
               </button>
 
               <button
@@ -454,7 +576,7 @@ export default function LibraryPage() {
                 className="w-9 h-9 rounded-xl bg-[#161c2a] border border-[#29344c] text-[#a0acc7] hover:text-white flex items-center justify-center text-xs transition-colors cursor-pointer"
                 title="Refresh Library"
               >
-                ↻
+                <RotateCw className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
@@ -494,7 +616,9 @@ export default function LibraryPage() {
         {!user && !isLoading && (
           <section className="bg-gradient-to-r from-blue-950/40 via-[#101524] to-[#121626] border border-blue-500/30 rounded-3xl p-6 sm:p-7 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <span className="text-2xl">🔐</span>
+              <div className="w-10 h-10 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0">
+                <Lock className="w-5 h-5 text-blue-400" />
+              </div>
               <div>
                 <h3 className="text-sm font-bold text-white">Sign In to Save Your Personal Library</h3>
                 <p className="text-xs text-[#8c9cb9]">
@@ -532,7 +656,8 @@ export default function LibraryPage() {
                   : "bg-[#111520] border border-[#202739] text-[#8e9cb8] hover:text-white"
               }`}
             >
-              <span>📚 All</span>
+              <LibraryIcon className="w-3.5 h-3.5" />
+              <span>All</span>
               <span className="text-[10px] bg-black/30 px-1.5 py-0.5 rounded-full font-mono">{stats.total}</span>
             </button>
 
@@ -557,7 +682,7 @@ export default function LibraryPage() {
                       : "bg-[#111520] border border-[#202739] text-[#8e9cb8] hover:text-white"
                   }`}
                 >
-                  <span>{s.icon}</span>
+                  <StatusIcon status={s.id} className="w-3.5 h-3.5" />
                   <span>{s.label}</span>
                   <span className="text-[10px] bg-black/30 px-1.5 py-0.5 rounded-full font-mono">{count}</span>
                 </button>
@@ -574,14 +699,63 @@ export default function LibraryPage() {
                   : "bg-[#111520] border border-[#202739] text-amber-400/80 hover:text-amber-300"
               }`}
             >
-              <span>⭐ Favourites</span>
+              <Star className="w-3.5 h-3.5 fill-current" />
+              <span>Favourites</span>
               <span className="text-[10px] bg-black/30 px-1.5 py-0.5 rounded-full font-mono text-black font-bold">
                 {stats.favourites}
               </span>
             </button>
+
+            {/* Release Radar Tab */}
+            <button
+              type="button"
+              onClick={() => setActiveTab("RADAR")}
+              className={`px-4 py-2 rounded-full font-bold transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
+                activeTab === "RADAR"
+                  ? "bg-gradient-to-r from-[#ff5238] to-[#ff7355] text-white shadow-lg shadow-[#ff5238]/30 scale-105"
+                  : "bg-[#111520] border border-[#ff5238]/40 text-[#ff684e] hover:bg-[#ff5238]/10"
+              }`}
+            >
+              <Radio className={`w-3.5 h-3.5 ${radarItems.length > 0 ? "animate-pulse" : ""}`} />
+              <span>Release Radar</span>
+              <span className="text-[10px] bg-black/40 px-1.5 py-0.5 rounded-full font-mono text-white font-bold">
+                {isRadarLoading ? "..." : radarItems.length}
+              </span>
+            </button>
           </div>
 
-          {/* ================= SEARCH & TOOLBAR ================= */}
+          {/* Radar Detected Alert Banner (Shows when updates detected and not on radar tab) */}
+          {radarItems.length > 0 && activeTab !== "RADAR" && (
+            <div className="bg-gradient-to-r from-[#ff5238]/15 via-[#18131e] to-[#0d101a] border border-[#ff5238]/40 rounded-2xl p-3.5 px-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xl animate-fadeIn">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-[#ff5238]/20 border border-[#ff5238]/30 flex items-center justify-center shrink-0">
+                  <Radio className="w-5 h-5 text-[#ff5238] animate-pulse" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-white flex items-center gap-2">
+                    <span>Sequel Radar Alert</span>
+                    <span className="bg-[#ff5238] text-white text-[10px] px-2 py-0.5 rounded-full font-black">
+                      {radarItems.length} New Upcoming Updates
+                    </span>
+                  </h4>
+                  <p className="text-[11px] text-[#91a0be] mt-0.5">
+                    Upcoming seasons, sequels, or movies detected for anime in your personal library!
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveTab("RADAR")}
+                className="bg-[#ff5238] hover:bg-[#ff684f] text-white font-bold text-xs px-4 py-2 rounded-xl shadow-lg shadow-[#ff5238]/25 transition-all flex items-center gap-1.5 shrink-0 cursor-pointer self-start sm:self-auto"
+              >
+                <span>View Release Radar</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          {/* ================= SEARCH & TOOLBAR (Hidden in Radar mode) ================= */}
+          {activeTab !== "RADAR" && (
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-[#0d101a] border border-[#1d2436] rounded-2xl p-3 text-xs">
             {/* Search within library */}
             <div className="relative flex-1 max-w-md">
@@ -601,7 +775,7 @@ export default function LibraryPage() {
                   onClick={() => setSearchQuery("")}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-[#7382a0] hover:text-white"
                 >
-                  ✕
+                  <X className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>
@@ -615,10 +789,10 @@ export default function LibraryPage() {
                   onChange={(e) => setSelectedCustomList(e.target.value)}
                   className="bg-[#121624] border border-[#252f45] text-white px-3 py-2 rounded-xl outline-none cursor-pointer"
                 >
-                  <option value="ALL">📁 All Custom Lists</option>
+                  <option value="ALL">All Custom Lists</option>
                   {userCustomLists.map((l) => (
                     <option key={l} value={l}>
-                      📁 {l}
+                      {l}
                     </option>
                   ))}
                 </select>
@@ -679,6 +853,7 @@ export default function LibraryPage() {
               </div>
             </div>
           </div>
+          )}
         </section>
 
         {/* ================= BULK ACTIONS FLOATING TOOLBAR ================= */}
@@ -713,11 +888,11 @@ export default function LibraryPage() {
                   className="bg-[#0e121d] border border-[#2b354d] text-white px-3 py-1.5 rounded-xl outline-none cursor-pointer"
                 >
                   <option value="">Move Status...</option>
-                  <option value="CURRENT">▶️ Currently Watching</option>
-                  <option value="COMPLETED">✅ Completed</option>
-                  <option value="PLANNING">🗓️ Plan to Watch</option>
-                  <option value="PAUSED">⏸️ On Hold</option>
-                  <option value="DROPPED">⏹️ Dropped</option>
+                  <option value="CURRENT">Currently Watching</option>
+                  <option value="COMPLETED">Completed</option>
+                  <option value="PLANNING">Plan to Watch</option>
+                  <option value="PAUSED">On Hold</option>
+                  <option value="DROPPED">Dropped</option>
                 </select>
 
                 {/* Bulk Favourite */}
@@ -725,9 +900,10 @@ export default function LibraryPage() {
                   type="button"
                   onClick={() => handleBulkToggleFavourite(true)}
                   disabled={isBulkSaving}
-                  className="bg-[#1f2638] hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 px-3 py-1.5 rounded-xl font-bold cursor-pointer"
+                  className="bg-[#1f2638] hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 px-3 py-1.5 rounded-xl font-bold cursor-pointer flex items-center gap-1.5"
                 >
-                  ⭐ Star
+                  <Star className="w-3.5 h-3.5 fill-amber-300" />
+                  <span>Star</span>
                 </button>
 
                 <button
@@ -768,17 +944,272 @@ export default function LibraryPage() {
                   type="button"
                   onClick={handleBulkDelete}
                   disabled={isBulkSaving}
-                  className="bg-rose-950/60 hover:bg-rose-900 border border-rose-500/40 text-rose-300 font-bold px-3 py-1.5 rounded-xl cursor-pointer"
+                  className="bg-rose-950/60 hover:bg-rose-900 border border-rose-500/40 text-rose-300 font-bold px-3 py-1.5 rounded-xl cursor-pointer flex items-center gap-1.5"
                 >
-                  🗑️ Delete
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete</span>
                 </button>
               </div>
             )}
           </section>
         )}
 
-        {/* ================= ANIME LISTINGS (GRID OR TABLE) ================= */}
-        {isLoading ? (
+        {/* ================= RELEASE RADAR VIEW ================= */}
+        {activeTab === "RADAR" ? (
+          <section className="space-y-6 animate-fadeIn">
+            {/* Radar Header & Urgency Filters */}
+            <div className="bg-[#0d101a] border border-[#1d2436] rounded-3xl p-5 sm:p-6 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#1b2234] pb-4">
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    <Radio className="w-4 h-4 text-[#ff5238]" />
+                    <span>Sequel Radar & Release Countdowns</span>
+                    <span className="text-xs bg-[#ff5238]/20 text-[#ff5238] border border-[#ff5238]/30 px-2 py-0.5 rounded-full font-bold">
+                      Live Tracking
+                    </span>
+                  </h3>
+                  <p className="text-xs text-[#7e8ea9] mt-0.5">
+                    Automatically tracking announced sequels, next seasons, and movies for anime in your library.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-[#6e7e9a]">Found {radarItems.length} upcoming releases</span>
+                </div>
+              </div>
+
+              {/* Urgency Filter Tabs */}
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setRadarFilter("ALL")}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                    radarFilter === "ALL"
+                      ? "bg-white text-black shadow-md shadow-white/20"
+                      : "bg-[#141826] border border-[#222a3d] text-[#8e9cb8] hover:text-white"
+                  }`}
+                >
+                  <span>All Upcoming</span>
+                  <span className="text-[10px] bg-black/30 px-1.5 py-0.5 rounded-full font-mono">{radarItems.length}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setRadarFilter("AIRING_WEEK")}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                    radarFilter === "AIRING_WEEK"
+                      ? "bg-rose-500 text-white shadow-md shadow-rose-500/30"
+                      : "bg-[#141826] border border-rose-500/30 text-rose-300 hover:text-white"
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-rose-400 animate-ping"></span>
+                  <span>Airing This Week</span>
+                  <span className="text-[10px] bg-black/40 px-1.5 py-0.5 rounded-full font-mono">{radarStats.week}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setRadarFilter("AIRING_MONTH")}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                    radarFilter === "AIRING_MONTH"
+                      ? "bg-amber-400 text-black shadow-md shadow-amber-400/30"
+                      : "bg-[#141826] border border-amber-500/30 text-amber-300 hover:text-white"
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                  <span>Airing This Month</span>
+                  <span className="text-[10px] bg-black/40 px-1.5 py-0.5 rounded-full font-mono">{radarStats.month}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setRadarFilter("UPCOMING_SEASON")}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                    radarFilter === "UPCOMING_SEASON"
+                      ? "bg-blue-500 text-white shadow-md shadow-blue-500/30"
+                      : "bg-[#141826] border border-blue-500/30 text-blue-300 hover:text-white"
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                  <span>Next Season</span>
+                  <span className="text-[10px] bg-black/40 px-1.5 py-0.5 rounded-full font-mono">{radarStats.season}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setRadarFilter("ANNOUNCED_TBA")}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                    radarFilter === "ANNOUNCED_TBA"
+                      ? "bg-purple-500 text-white shadow-md shadow-purple-500/30"
+                      : "bg-[#141826] border border-purple-500/30 text-purple-300 hover:text-white"
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-purple-400"></span>
+                  <span>Announced / TBA</span>
+                  <span className="text-[10px] bg-black/40 px-1.5 py-0.5 rounded-full font-mono">{radarStats.tba}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Radar Cards Grid */}
+            {isRadarLoading ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-5">
+                {[...Array(10)].map((_, i) => (
+                  <div key={i} className="aspect-[3/4.8] bg-[#121624] rounded-2xl animate-pulse"></div>
+                ))}
+              </div>
+            ) : filteredRadarItems.length === 0 ? (
+              <div className="p-12 text-center bg-[#0d101a] border border-[#1b2234] rounded-3xl space-y-3">
+                <Radio className="w-10 h-10 text-[#556482] mx-auto" />
+                <h3 className="text-base font-bold text-white">No Upcoming Releases in this Category</h3>
+                <p className="text-xs text-[#7584a2] max-w-sm mx-auto">
+                  {radarItems.length === 0
+                    ? "Add anime you have watched or are currently watching to your library, and upcoming sequels will automatically appear here!"
+                    : "No sequels match your active urgency filter."}
+                </p>
+                {radarFilter !== "ALL" && (
+                  <button
+                    type="button"
+                    onClick={() => setRadarFilter("ALL")}
+                    className="text-xs text-[#ff5238] hover:underline font-bold cursor-pointer"
+                  >
+                    View All Upcoming Releases ({radarItems.length})
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-5">
+                {filteredRadarItems.map((item) => {
+                  const isSavedInLibrary = library.some((l) => l.anime_id === item.id);
+                  const isUrgent = item.urgency === "AIRING_WEEK";
+                  const isApproaching = item.urgency === "AIRING_MONTH";
+                  const title = getAnimeTitle(item.title);
+
+                  return (
+                    <div
+                      key={item.id}
+                      className={`group relative flex flex-col bg-[#0d101a] border rounded-2xl overflow-hidden transition-all duration-300 hover:-translate-y-1 ${
+                        isUrgent
+                          ? "border-rose-500/60 shadow-lg shadow-rose-500/20"
+                          : isApproaching
+                          ? "border-amber-500/50 shadow-md shadow-amber-500/15"
+                          : "border-[#1c2336] hover:border-[#2f3b57] hover:shadow-xl"
+                      }`}
+                    >
+                      {/* Poster image with Urgency & Relation Badges */}
+                      <div
+                        onClick={() => setDetailModalAnime(item)}
+                        className="relative aspect-[3/4.2] w-full bg-[#121624] overflow-hidden cursor-pointer"
+                      >
+                        <Image
+                          src={item.coverImage?.extraLarge || item.coverImage?.large || "/images/hero-art.jpg"}
+                          alt={title}
+                          fill
+                          sizes="(max-width: 640px) 100vw, (max-width: 1024px) 33vw, 220px"
+                          className="object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-[#0d101a] via-transparent to-transparent opacity-90"></div>
+
+                        {/* Unified Top Header Bar (Prevents any overlap between badges) */}
+                        <div className="absolute top-2 inset-x-2 z-10 flex items-start justify-between gap-1.5 pointer-events-none">
+                          {/* Relation Badge */}
+                          <div className="min-w-0 flex-1">
+                            <span className="inline-flex items-center text-[10px] font-bold px-2 py-0.5 rounded-lg border backdrop-blur-md bg-black/80 border-white/20 text-white max-w-full">
+                              {item.relationType === "SELF" ? (
+                                <span className="inline-flex items-center gap-1 truncate">
+                                  <Tv className="w-3 h-3 text-emerald-400 shrink-0" />
+                                  <strong className="text-emerald-400">In Watchlist</strong>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 truncate">
+                                  <Zap className="w-3 h-3 text-[#ff5238] shrink-0" />
+                                  <span>{item.relationBadge} to</span>
+                                  <strong className="text-[#ff5238] truncate">{item.parentAnimeTitle}</strong>
+                                </span>
+                              )}
+                            </span>
+                          </div>
+
+                          {/* Urgency Badge */}
+                          <span
+                            className={`text-[10px] font-black px-2 py-0.5 rounded-lg border backdrop-blur-md shrink-0 whitespace-nowrap shadow-md ${
+                              isUrgent
+                                ? "bg-rose-950/95 text-rose-300 border-rose-500/60 animate-pulse"
+                                : isApproaching
+                                ? "bg-amber-950/95 text-amber-300 border-amber-500/60"
+                                : "bg-blue-950/95 text-blue-300 border-blue-500/50"
+                            }`}
+                          >
+                            {item.urgencyLabel}
+                          </span>
+                        </div>
+
+                        {/* Format & Studio Badge */}
+                        <div className="absolute bottom-2 left-2.5 z-10 flex items-center gap-1.5">
+                          <span className="text-[10px] font-bold bg-[#141826]/90 border border-white/10 text-[#a0b0cf] px-1.5 py-0.5 rounded-md backdrop-blur-md">
+                            {item.format || "TV"}
+                          </span>
+                          {item.studios?.[0] && (
+                            <span className="text-[10px] font-semibold bg-[#141826]/90 border border-white/10 text-[#8ea0c2] px-1.5 py-0.5 rounded-md backdrop-blur-md truncate max-w-[120px]">
+                              {item.studios[0]}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Card Content & Countdown */}
+                      <div className="p-3.5 flex flex-col flex-1 justify-between gap-3">
+                        <div onClick={() => setDetailModalAnime(item)} className="cursor-pointer space-y-1">
+                          <h4 
+                            title={title}
+                            className="text-xs font-bold text-white line-clamp-2 leading-snug group-hover:text-[#ff5238] transition-colors min-h-[2rem]"
+                          >
+                            {title}
+                          </h4>
+                          {item.title?.romaji && item.title?.romaji !== title && (
+                            <p className="text-[10px] text-[#6b7b99] line-clamp-1 italic" title={item.title.romaji}>
+                              {item.title.romaji}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Countdown Ticker */}
+                        <div className="pt-2 border-t border-[#182030] space-y-1.5">
+                          <RadarCountdown
+                            targetTimestamp={item.targetTimestamp}
+                            datePrecision={item.datePrecision}
+                            urgency={item.urgency}
+                          />
+                        </div>
+
+                        {/* Action: Add to Plan to Watch / Already Tracked */}
+                        <div className="pt-1">
+                          {isSavedInLibrary ? (
+                            <div className="w-full py-2 bg-[#101420] border border-[#232c40] text-[#7ea0cb] text-[11px] font-bold rounded-xl flex items-center justify-center gap-1.5 select-none">
+                              <Check className="w-3.5 h-3.5 text-emerald-400" />
+                              <span>Tracked in Your Library</span>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleAddRadarAnimeToLibrary(item)}
+                              className="w-full py-2 bg-[#ff5238] hover:bg-[#ff684f] text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-md shadow-[#ff5238]/25 transition-all cursor-pointer"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                              <span>Add to Plan to Watch</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        ) : (
+        /* ================= ANIME LISTINGS (GRID OR TABLE) ================= */
+        isLoading ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
             {[...Array(12)].map((_, i) => (
               <div key={i} className="aspect-[3/4.6] bg-[#121624] rounded-2xl animate-pulse"></div>
@@ -786,7 +1217,7 @@ export default function LibraryPage() {
           </div>
         ) : filteredLibrary.length === 0 ? (
           <div className="p-12 text-center bg-[#0d101a] border border-[#1b2234] rounded-3xl space-y-3">
-            <span className="text-4xl">🍿</span>
+            <Film className="w-10 h-10 text-[#556482] mx-auto" />
             <h3 className="text-base font-bold text-white">No Anime Found in this View</h3>
             <p className="text-xs text-[#7584a2] max-w-sm mx-auto">
               {library.length === 0
@@ -876,7 +1307,7 @@ export default function LibraryPage() {
                       }`}
                       title={item.is_favourite ? "Favorited" : "Mark as Favourite"}
                     >
-                      ★
+                      <Star className={`w-3.5 h-3.5 ${item.is_favourite ? "fill-black text-black" : "fill-current"}`} />
                     </button>
 
                     {/* Status Badge */}
@@ -888,11 +1319,16 @@ export default function LibraryPage() {
 
                     {/* User Score Badge */}
                     {item.user_score !== null && (
-                      <div className="absolute bottom-2 right-2 bg-black/80 backdrop-blur-md border border-amber-400/30 text-amber-400 text-[10px] font-black px-1.5 py-0.5 rounded-md flex items-center gap-0.5">
-                        <span>★</span>
+                      <div className="absolute bottom-2 right-2 bg-black/80 backdrop-blur-md border border-amber-400/30 text-amber-400 text-[10px] font-black px-1.5 py-0.5 rounded-md flex items-center gap-1">
+                        <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-400" />
                         <span>{item.user_score}</span>
                       </div>
                     )}
+
+                    {/* Quick Hover Stream Options */}
+                    <div className="absolute inset-x-2 bottom-8 z-20 opacity-0 group-hover:opacity-100 transition-all duration-200 flex items-center justify-center gap-1.5 backdrop-blur-md bg-black/90 p-1 rounded-xl border border-white/20 shadow-xl">
+                      <WatchOptions anime={{ title: item.anime_title }} compact />
+                    </div>
                   </div>
 
                   {/* Card Info Details */}
@@ -942,7 +1378,8 @@ export default function LibraryPage() {
                       {/* Rewatch Counter tag if > 0 */}
                       {item.rewatch_counter > 0 && (
                         <p className="text-[10px] text-[#ffb703] font-medium flex items-center gap-1">
-                          <span>🔁</span> Rewatched {item.rewatch_counter}x
+                          <Repeat className="w-3 h-3 text-[#ffb703] shrink-0" />
+                          <span>Rewatched {item.rewatch_counter}x</span>
                         </p>
                       )}
 
@@ -1024,7 +1461,7 @@ export default function LibraryPage() {
                           <span className="font-bold text-white hover:text-[#ff5238] transition-colors">
                             {item.anime_title}
                           </span>
-                          {item.is_favourite && <span className="text-amber-400">★</span>}
+                          {item.is_favourite && <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400 shrink-0" />}
                         </div>
                         <p className="text-[10px] text-[#5e6d8a]">
                           {item.anime_format || "TV"} • {item.anime_season || "Anime"} {item.anime_season_year || ""}
@@ -1078,16 +1515,19 @@ export default function LibraryPage() {
                         )}
                       </td>
                       <td className="p-3 text-right" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingAnime(item);
-                            setIsModalOpen(true);
-                          }}
-                          className="bg-[#161c2a] hover:bg-[#20273a] text-white font-semibold text-[11px] px-3 py-1 rounded-lg border border-[#273248] transition-colors cursor-pointer"
-                        >
-                          Edit
-                        </button>
+                        <div className="flex items-center justify-end gap-2">
+                          <WatchOptions anime={{ title: item.anime_title }} compact />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingAnime(item);
+                              setIsModalOpen(true);
+                            }}
+                            className="bg-[#161c2a] hover:bg-[#20273a] text-white font-semibold text-[11px] px-3 py-1 rounded-lg border border-[#273248] transition-colors cursor-pointer"
+                          >
+                            Edit
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -1095,7 +1535,8 @@ export default function LibraryPage() {
               </tbody>
             </table>
           </div>
-        )}
+        )
+      )}
       </main>
 
       {/* ================= EDIT MODAL ================= */}
@@ -1128,6 +1569,14 @@ export default function LibraryPage() {
               );
             }
           }}
+        />
+      )}
+
+      {/* Modal: Anime Details (Full synopsis, trailers, studios) */}
+      {detailModalAnime && (
+        <AnimeDetailModal
+          anime={detailModalAnime}
+          onClose={() => setDetailModalAnime(null)}
         />
       )}
     </div>
