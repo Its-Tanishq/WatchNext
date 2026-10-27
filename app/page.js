@@ -1,18 +1,49 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { createClient } from "@/utils/supabase/client";
+import AnimeCard from "./components/AnimeCard";
+import AnimeDetailModal from "./components/AnimeDetailModal";
+import CategoryExplorer from "./components/CategoryExplorer";
+import ScheduleExplorer from "./components/ScheduleExplorer";
+import { formatScore, getAnimeTitle, getWeekDays } from "@/utils/anilist";
 
 export default function HomePage() {
-  const [activeTab, setActiveTab] = useState("Home");
-  const [activeFilter, setActiveFilter] = useState("For You");
-  const [activeScheduleDay, setActiveScheduleDay] = useState("T");
-  const [searchQuery, setSearchQuery] = useState("");
+  // Navigation & Category States
+  // activeCategory can be: "All", "Trending", "Top Rated", "Upcoming", "Seasonal", "Schedule"
+  const [activeCategory, setActiveCategory] = useState("All");
   const [user, setUser] = useState(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
 
+  // Curated Home Anime States
+  const [trending, setTrending] = useState([]);
+  const [seasonal, setSeasonal] = useState([]);
+  const [topRated, setTopRated] = useState([]);
+  const [upcoming, setUpcoming] = useState([]);
+  const [schedule, setSchedule] = useState([]);
+  const [seasonInfo, setSeasonInfo] = useState({ season: "CURRENT", seasonYear: 2026 });
+  const [heroIndex, setHeroIndex] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Selected Anime for Detail Modal (opens on click anywhere)
+  const [selectedAnime, setSelectedAnime] = useState(null);
+
+  // Search State
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+  const searchRef = useRef(null);
+  const searchCacheRef = useRef(new Map());
+  const abortControllerRef = useRef(null);
+
+  // Curated Schedule Day State (Widget on Home)
+  const [scheduleOffset, setScheduleOffset] = useState(0);
+  const [isScheduleLoading, setIsScheduleLoading] = useState(false);
+
+  // Supabase Auth listener
   useEffect(() => {
     const supabase = createClient();
     supabase.auth.getUser().then(({ data }) => {
@@ -35,234 +66,184 @@ export default function HomePage() {
     setShowUserMenu(false);
   };
 
-  const filterTabs = [
-    "For You",
-    "Trending",
-    "Top Rated",
-    "Airing Now",
-    "Fall 2026",
-    "Movies & Specials",
+  // Fetch Curated Home Anime Data on Mount
+  useEffect(() => {
+    async function loadHomeAnime() {
+      try {
+        setIsLoading(true);
+        const res = await fetch("/api/anime/home");
+        if (res.ok) {
+          const data = await res.json();
+          setTrending(data.trending || []);
+          setSeasonal(data.seasonal || []);
+          setTopRated(data.topRated || []);
+          setUpcoming(data.upcoming || []);
+          setSchedule(data.schedule || []);
+          if (data.season && data.seasonYear) {
+            setSeasonInfo({ season: data.season, seasonYear: data.seasonYear });
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load anime data:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    loadHomeAnime();
+  }, []);
+
+  // Ultra-Fast Live Search with Memory Cache & Keystroke Cancellation
+  useEffect(() => {
+    const trimmed = searchQuery.trim().toLowerCase();
+    if (!trimmed) {
+      const resetTimer = setTimeout(() => {
+        setSearchResults([]);
+        setIsSearching(false);
+      }, 0);
+      return () => clearTimeout(resetTimer);
+    }
+
+    // 1. Instant 0ms response if query is in memory cache
+    if (searchCacheRef.current.has(trimmed)) {
+      setSearchResults(searchCacheRef.current.get(trimmed));
+      setIsSearching(false);
+      setShowSearchDropdown(true);
+      return;
+    }
+
+    setIsSearching(true);
+    setShowSearchDropdown(true);
+
+    // 2. Abort any previous pending request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    // 3. Fast 180ms debounce for snappy feel
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/anime/search?q=${encodeURIComponent(trimmed)}&perPage=6`, {
+          signal: controller.signal,
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const results = data.results || [];
+          searchCacheRef.current.set(trimmed, results);
+          setSearchResults(results);
+        }
+      } catch (err) {
+        if (err.name !== "AbortError") {
+          console.error("Search fetch error:", err);
+        }
+      } finally {
+        setIsSearching(false);
+      }
+    }, 180);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [searchQuery]);
+
+  // Click outside to close search dropdown
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (searchRef.current && !searchRef.current.contains(event.target)) {
+        setShowSearchDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Dynamic 7 days of the week (Monday to Sunday)
+  const weekDays = useMemo(() => getWeekDays(), []);
+  const todayItem = weekDays.find((d) => d.isToday) || weekDays[0];
+
+  // Fetch Airing Schedule when Home Day widget changes
+  const handleDaySelect = async (offset) => {
+    setScheduleOffset(offset);
+    setIsScheduleLoading(true);
+    try {
+      const res = await fetch(`/api/anime/schedule?dayOffset=${offset}&perPage=50`);
+      if (res.ok) {
+        const data = await res.json();
+        setSchedule(data.schedule || []);
+      }
+    } catch (err) {
+      console.error("Schedule error:", err);
+    } finally {
+      setIsScheduleLoading(false);
+    }
+  };
+
+  const formatAiringTime = (timestamp) => {
+    if (!timestamp) return "TBD";
+    const date = new Date(timestamp * 1000);
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  };
+
+  const formatCountdown = (timeUntil) => {
+    if (timeUntil <= 0) return "Airing Now";
+    const hours = Math.floor(timeUntil / 3600);
+    const mins = Math.floor((timeUntil % 3600) / 60);
+    if (hours > 24) {
+      const days = Math.floor(hours / 24);
+      return `In ${days}d ${hours % 24}h`;
+    }
+    if (hours > 0) return `In ${hours}h ${mins}m`;
+    return `In ${mins}m`;
+  };
+
+  const categoryTabs = [
+    { label: "All", id: "All" },
+    { label: "Trending", id: "Trending" },
+    { label: "Top Rated", id: "Top Rated" },
+    { label: "Upcoming", id: "Upcoming" },
+    { label: `${seasonInfo.season} ${seasonInfo.seasonYear}`, id: "Seasonal" },
+    { label: "Schedule", id: "Schedule" },
   ];
 
-  // Continue Watching List
-  const continueWatching = [
-    {
-      id: "hollow-circuit",
-      title: "Hollow Circuit",
-      progress: "EP 4 / 12 • 18m left",
-      percent: 65,
-      image: "/images/hollow-circuit.jpg",
-    },
-    {
-      id: "iron-blossom",
-      title: "Iron Blossom",
-      progress: "EP 7 / 24 • 12m left",
-      percent: 32,
-      image: "/images/iron-blossom.jpg",
-    },
-    {
-      id: "deep-current",
-      title: "Deep Current",
-      progress: "EP 1 / 12 • Just started",
-      percent: 10,
-      image: "/images/deep-current.jpg",
-    },
-  ];
+  // Helper to switch category and scroll smoothly to top
+  const switchCategory = (category) => {
+    setActiveCategory(category);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
 
-  // Trending Now List
-  const trendingList = [
-    {
-      rank: "#1",
-      badge: "HOT",
-      rating: "9.41",
-      title: "Neon Requiem",
-      type: "Fall 2026 • TV",
-      episodes: "24 eps • Mappa",
-      image: "/images/neon-requiem.jpg",
-    },
-    {
-      rank: "#2",
-      badge: "TOP",
-      rating: "9.28",
-      title: "Starfall Bakery",
-      type: "Fall 2026 • TV",
-      episodes: "12 eps • CloverWorks",
-      image: "/images/starfall-bakery.jpg",
-    },
-    {
-      rank: "#3",
-      badge: "NEW",
-      rating: "9.22",
-      title: "Iron Blossom",
-      type: "Fall 2026 • TV",
-      episodes: "24 eps • Ufotable",
-      image: "/images/iron-blossom.jpg",
-    },
-    {
-      rank: "#4",
-      rating: "9.17",
-      title: "Deep Current",
-      type: "Fall 2026 • TV",
-      episodes: "12 eps • Wit Studio",
-      image: "/images/deep-current.jpg",
-    },
-    {
-      rank: "#5",
-      rating: "9.10",
-      title: "Paper Moons",
-      type: "Fall 2026 • TV",
-      episodes: "13 eps • CoMix Wave",
-      image: "/images/paper-moons.jpg",
-    },
-    {
-      rank: "#6",
-      rating: "9.04",
-      title: "Hollow Circuit",
-      type: "Fall 2026 • TV",
-      episodes: "12 eps • Production I.G",
-      image: "/images/hollow-circuit.jpg",
-    },
-    {
-      rank: "#7",
-      rating: "8.92",
-      title: "Moon & Ember",
-      type: "Fall 2026 • Movie",
-      episodes: "Film • Ghibli",
-      image: "/images/moon-ember.jpg",
-    },
-  ];
-
-  // Fall 2026 Seasonal List
-  const seasonalList = [
-    {
-      rank: "#1",
-      rating: "9.12",
-      badge: "HOT",
-      title: "Skywhale Chronicle",
-      type: "Fall 2026 • TV",
-      episodes: "24 eps • Trigger",
-      image: "/images/skywhale.jpg",
-    },
-    {
-      rank: "RANK 01",
-      rating: "9.02",
-      badge: "NEW",
-      title: "Iron Blossom",
-      type: "Fall 2026 • TV",
-      episodes: "24 eps • Ufotable",
-      image: "/images/iron-blossom.jpg",
-    },
-    {
-      rank: "#3",
-      rating: "8.98",
-      title: "Hollow Circuit",
-      type: "Fall 2026 • TV",
-      episodes: "12 eps • Production I.G",
-      image: "/images/hollow-circuit.jpg",
-    },
-    {
-      rank: "#4",
-      rating: "8.91",
-      title: "Neon Requiem",
-      type: "Fall 2026 • TV",
-      episodes: "24 eps • Mappa",
-      image: "/images/neon-requiem.jpg",
-    },
-    {
-      rank: "#5",
-      rating: "8.77",
-      title: "Deep Current",
-      type: "Fall 2026 • TV",
-      episodes: "12 eps • Wit Studio",
-      image: "/images/deep-current.jpg",
-    },
-    {
-      rank: "#6",
-      rating: "8.65",
-      title: "Paper Moons",
-      type: "Fall 2026 • TV",
-      episodes: "13 eps • CoMix Wave",
-      image: "/images/paper-moons.jpg",
-    },
-    {
-      rank: "#7",
-      rating: "8.42",
-      title: "Starfall Bakery",
-      type: "Fall 2026 • TV",
-      episodes: "12 eps • CloverWorks",
-      image: "/images/starfall-bakery.jpg",
-    },
-  ];
-
-  // All Time Hall of Fame
-  const hallOfFame = [
-    {
-      rank: "#1",
-      rating: "9.50",
-      badge: "#1",
-      title: "Moon & Ember",
-      type: "2024 • Film",
-      episodes: "Studio Ghibli",
-      image: "/images/moon-ember.jpg",
-    },
-    {
-      rank: "#2",
-      rating: "9.34",
-      title: "Voyager Reactor",
-      type: "2023 • TV",
-      episodes: "26 eps • Sunrise",
-      image: "/images/hollow-circuit.jpg",
-    },
-    {
-      rank: "#3",
-      rating: "9.25",
-      title: "Demon Blade",
-      type: "2022 • TV",
-      episodes: "26 eps • Ufotable",
-      image: "/images/iron-blossom.jpg",
-    },
-    {
-      rank: "#4",
-      rating: "9.18",
-      title: "Umami Wars",
-      type: "2021 • TV",
-      episodes: "12 eps • J.C. Staff",
-      image: "/images/starfall-bakery.jpg",
-    },
-    {
-      rank: "#5",
-      rating: "9.14",
-      title: "Silent Orbit",
-      type: "2025 • TV",
-      episodes: "12 eps • Bones",
-      image: "/images/hero-art.jpg",
-    },
-    {
-      rank: "#6",
-      rating: "9.11",
-      title: "Ronin's Alley",
-      type: "2023 • TV",
-      episodes: "24 eps • Mappa",
-      image: "/images/neon-requiem.jpg",
-    },
-    {
-      rank: "#7",
-      rating: "8.99",
-      title: "Glass River",
-      type: "2022 • Film",
-      episodes: "Kyoto Animation",
-      image: "/images/deep-current.jpg",
-    },
-  ];
+  // Active Hero Anime from top trending
+  const heroAnime = trending[heroIndex] || trending[0] || null;
+  const heroTitle = heroAnime ? getAnimeTitle(heroAnime.title) : "Loading featured...";
+  const heroScore = heroAnime ? formatScore(heroAnime.averageScore) : "9.0";
+  const heroCover = heroAnime?.bannerImage || heroAnime?.coverImage?.extraLarge || "/images/skywhale.jpg";
+  const heroPoster = heroAnime?.coverImage?.extraLarge || heroAnime?.coverImage?.large || "/images/hero-art.jpg";
+  const heroStudio = heroAnime?.studios?.nodes?.[0]?.name || "Anime Studio";
+  const heroSynopsis = heroAnime?.description
+    ? heroAnime.description.replace(/<[^>]*>?/gm, "")
+    : "Experience premier storytelling, high-stakes animation, and acclaimed cinematic direction.";
 
   return (
     <div className="min-h-screen bg-[#07090e] text-[#e8ebf2] font-sans selection:bg-[#ff5238] selection:text-white pb-16">
+      {/* ================= DETAIL MODAL ================= */}
+      {selectedAnime && (
+        <AnimeDetailModal
+          anime={selectedAnime}
+          onClose={() => setSelectedAnime(null)}
+        />
+      )}
+
       {/* ================= STICKY TOP NAVBAR ================= */}
-      <header className="sticky top-0 z-50 bg-[#07090e]/90 backdrop-blur-md border-b border-[#181d2a]">
+      <header className="sticky top-0 z-40 bg-[#07090e]/95 backdrop-blur-md border-b border-[#181d2a]">
         <div className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
           {/* Left: Brand Logo & Main Nav */}
           <div className="flex items-center gap-8">
-            <Link href="/" className="flex items-center gap-2.5 group">
+            <Link
+              href="/"
+              onClick={() => switchCategory("All")}
+              className="flex items-center gap-2.5 group"
+            >
               <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#ff5b42] to-[#f03b24] flex items-center justify-center shadow-lg shadow-[#ff5238]/25 group-hover:scale-105 transition-transform">
                 <span className="font-extrabold text-white text-base tracking-wider">W</span>
               </div>
@@ -272,37 +253,53 @@ export default function HomePage() {
               </div>
             </Link>
 
-            {/* Desktop Navigation Links */}
-            <nav className="hidden md:flex items-center gap-1 text-sm font-medium">
-              {["Home", "Discover", "Seasonal", "Schedule", "Library", "Community"].map((tab) => {
-                const isActive = activeTab === tab;
+            {/* Desktop Navigation Links (Unified Primary Category Mode) */}
+            <nav className="hidden md:flex items-center gap-1.5 text-xs font-semibold">
+              {[
+                { name: "Home", cat: "All" },
+                { name: "Trending", cat: "Trending" },
+                { name: "Top Rated", cat: "Top Rated" },
+                { name: "Seasonal", cat: "Seasonal" },
+                { name: "Schedule", cat: "Schedule" },
+                { name: "Upcoming", cat: "Upcoming" },
+              ].map((tab) => {
+                const isActive = activeCategory === tab.cat;
                 return (
                   <button
-                    key={tab}
-                    onClick={() => setActiveTab(tab)}
-                    className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${
+                    key={tab.name}
+                    onClick={() => switchCategory(tab.cat)}
+                    className={`px-3.5 py-1.5 rounded-full transition-all cursor-pointer font-bold ${
                       isActive
-                        ? "text-white bg-[#141824] font-semibold"
-                        : "text-[#8592ad] hover:text-white hover:bg-[#10141f]"
+                        ? "bg-white text-[#0a0d14] shadow-md shadow-white/15 scale-105"
+                        : "text-[#8b98b5] hover:text-white hover:bg-[#121622]"
                     }`}
                   >
-                    {tab}
+                    {tab.name}
                   </button>
                 );
               })}
+
+              <Link
+                href="/library"
+                className="ml-1 px-3.5 py-1.5 rounded-full font-bold bg-[#151a28] hover:bg-[#ff5238] border border-[#273248] hover:border-[#ff5238] text-[#ff6750] hover:text-white transition-all flex items-center gap-1.5 shadow-sm"
+              >
+                <span>📚</span>
+                <span>Library</span>
+              </Link>
             </nav>
           </div>
 
           {/* Right: Search, Notification & Auth / Profile */}
           <div className="flex items-center gap-3">
-            {/* Search Input Bar */}
-            <div className="relative hidden sm:block w-64 lg:w-80">
+            {/* Search Input Bar with Live Dropdown */}
+            <div ref={searchRef} className="relative hidden sm:block w-64 lg:w-80">
               <input
                 type="text"
                 value={searchQuery}
+                onFocus={() => setShowSearchDropdown(true)}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search anime, movies, studios..."
-                className="w-full bg-[#11141e] border border-[#212738] focus:border-[#ff5238] focus:ring-1 focus:ring-[#ff5238] rounded-xl pl-9 pr-12 py-1.5 text-xs text-white placeholder-[#505c77] outline-none transition-all"
+                placeholder="Search anime from AniList..."
+                className="w-full bg-[#11141e] border border-[#212738] focus:border-[#ff5238] focus:ring-1 focus:ring-[#ff5238] rounded-xl pl-9 pr-10 py-1.5 text-xs text-white placeholder-[#505c77] outline-none transition-all"
               />
               <svg
                 className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#5e6b88]"
@@ -317,9 +314,77 @@ export default function HomePage() {
                   d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
                 />
               </svg>
-              <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] bg-[#1a1f2e] border border-[#273047] text-[#6d7b9c] px-1.5 py-0.5 rounded font-mono">
-                ⌘K
-              </span>
+              {isSearching ? (
+                <div className="w-3.5 h-3.5 border-2 border-[#ff5238] border-t-transparent rounded-full animate-spin absolute right-3 top-1/2 -translate-y-1/2"></div>
+              ) : searchQuery ? (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-[#717e9c] hover:text-white"
+                >
+                  ✕
+                </button>
+              ) : (
+                <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] bg-[#1a1f2e] border border-[#273047] text-[#6d7b9c] px-1.5 py-0.5 rounded font-mono">
+                  ⌘K
+                </span>
+              )}
+
+              {/* Instant Search Dropdown */}
+              {showSearchDropdown && searchQuery.trim() && (
+                <div className="absolute left-0 right-0 top-full mt-2 bg-[#0e121c] border border-[#252e44] rounded-2xl shadow-2xl overflow-hidden z-50 animate-fadeIn">
+                  <div className="p-2 border-b border-[#1b2234] flex items-center justify-between text-[11px] text-[#7584a3] px-3">
+                    <span>Results from AniList</span>
+                    {searchResults.length > 0 && <span>{searchResults.length} found</span>}
+                  </div>
+
+                  {isSearching ? (
+                    <div className="p-6 text-center text-xs text-[#707f9e]">
+                      <div className="w-5 h-5 border-2 border-[#ff5238] border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+                      Searching AniList...
+                    </div>
+                  ) : searchResults.length > 0 ? (
+                    <div className="max-h-80 overflow-y-auto divide-y divide-[#171d2b]">
+                      {searchResults.map((item) => (
+                        <div
+                          key={item.id}
+                          onClick={() => {
+                            setSelectedAnime(item);
+                            setShowSearchDropdown(false);
+                          }}
+                          className="flex items-center gap-3 p-2.5 hover:bg-[#151b2a] cursor-pointer transition-colors"
+                        >
+                          <div className="relative w-10 h-14 rounded-lg overflow-hidden shrink-0 bg-[#171c29]">
+                            <Image
+                              src={item.coverImage?.medium || item.coverImage?.large || "/images/hero-art.jpg"}
+                              alt={getAnimeTitle(item.title)}
+                              fill
+                              className="object-cover"
+                            />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h4 className="text-xs font-bold text-white truncate hover:text-[#ff5238]">
+                              {getAnimeTitle(item.title)}
+                            </h4>
+                            <p className="text-[10px] text-[#7583a2] mt-0.5 truncate">
+                              {item.seasonYear ? `${item.seasonYear} • ` : ""}{item.format || "TV"}
+                              {item.episodes ? ` • ${item.episodes} eps` : ""}
+                            </p>
+                          </div>
+                          {item.averageScore && (
+                            <span className="text-[10px] font-bold text-[#ffb703] bg-[#1a2030] px-2 py-0.5 rounded border border-[#2b354e] shrink-0">
+                              ★ {formatScore(item.averageScore)}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-6 text-center text-xs text-[#72809f]">
+                      No anime found for &quot;{searchQuery}&quot;
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Notifications Bell */}
@@ -341,7 +406,6 @@ export default function HomePage() {
             {/* User Profile Pill & Auth Links */}
             <div className="flex items-center gap-2 pl-1 relative">
               {user ? (
-                /* Authenticated User Pill with dropdown */
                 <div className="relative">
                   <button
                     type="button"
@@ -357,7 +421,6 @@ export default function HomePage() {
                     <span className="text-[10px] text-[#697796]">▾</span>
                   </button>
 
-                  {/* Dropdown Menu */}
                   {showUserMenu && (
                     <div className="absolute right-0 mt-2 w-48 bg-[#10141f] border border-[#242b3e] rounded-xl shadow-2xl py-1.5 z-50 animate-fadeIn">
                       <div className="px-3.5 py-2 border-b border-[#1b2233]">
@@ -365,14 +428,12 @@ export default function HomePage() {
                         <p className="text-xs font-semibold text-white truncate">{user.email}</p>
                       </div>
                       <Link
-                        href="#library"
+                        href="/library"
                         onClick={() => setShowUserMenu(false)}
                         className="flex items-center gap-2 px-3.5 py-2 text-xs text-[#a0acc7] hover:text-white hover:bg-[#181f30] transition-colors"
                       >
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
-                        </svg>
-                        <span>My Watchlist</span>
+                        <span>📚</span>
+                        <span>Personal Anime Library</span>
                       </Link>
                       <button
                         type="button"
@@ -388,7 +449,6 @@ export default function HomePage() {
                   )}
                 </div>
               ) : (
-                /* Unauthenticated Guest View */
                 <>
                   <Link
                     href="/signin"
@@ -411,635 +471,500 @@ export default function HomePage() {
 
       {/* ================= MAIN CONTAINER ================= */}
       <main className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 mt-5 space-y-9">
-        {/* ================= SUB-NAVIGATION FILTER CHIPS ================= */}
-        <section className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+        {/* ================= MOBILE-ONLY CATEGORY CHIPS (HIDDEN ON DESKTOP TO PREVENT DUPLICATION) ================= */}
+        <section className="md:hidden flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
-            {filterTabs.map((chip) => {
-              const isSelected = activeFilter === chip;
+            {categoryTabs.map((chip) => {
+              const isSelected = activeCategory === chip.id;
               return (
                 <button
-                  key={chip}
-                  onClick={() => setActiveFilter(chip)}
-                  className={`px-3.5 py-1.5 rounded-full font-medium whitespace-nowrap transition-all cursor-pointer ${
+                  key={chip.id}
+                  onClick={() => switchCategory(chip.id)}
+                  className={`px-4 py-2 rounded-full font-bold whitespace-nowrap transition-all cursor-pointer ${
                     isSelected
-                      ? "bg-white text-[#0a0d14] font-semibold shadow-sm"
+                      ? "bg-white text-[#0a0d14] shadow-md shadow-white/10 scale-105"
                       : "bg-[#11141e] border border-[#202636] text-[#8e9cb9] hover:text-white hover:border-[#2f384e]"
                   }`}
                 >
-                  {chip}
+                  {chip.label}
                 </button>
               );
             })}
+            <Link
+              href="/library"
+              className="px-4 py-2 rounded-full font-bold whitespace-nowrap transition-all bg-[#171d2b] border border-[#ff5238]/40 text-[#ff6750] flex items-center gap-1.5"
+            >
+              <span>📚</span>
+              <span>Library</span>
+            </Link>
           </div>
 
           <div className="flex items-center gap-2 text-[#7e8ba8] shrink-0">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span className="text-[11px] font-medium">Airing schedule synced • JST 21:00</span>
+            <span className="text-[11px] font-medium">AniList Live Synced • Real-Time GraphQL</span>
           </div>
         </section>
 
-        {/* ================= MASSIVE HERO FEATURED SHOWCASE ================= */}
-        <section className="relative rounded-3xl overflow-hidden border border-[#202738] bg-[#0c0f17] shadow-2xl">
-          {/* Panoramic Background Art with Vignettes */}
-          <div className="absolute inset-0 z-0">
-            <Image
-              src="/images/skywhale.jpg"
-              alt="Skywhale Chronicle Key Visual"
-              fill
-              priority
-              className="object-cover object-center brightness-60 scale-105"
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-[#0a0d14] via-[#0a0d14]/70 to-[#0a0d14]/40"></div>
-            <div className="absolute inset-0 bg-gradient-to-r from-[#0a0d14] via-[#0a0d14]/85 to-transparent"></div>
-          </div>
+        {/* ================= DYNAMIC VIEW RENDERING ================= */}
 
-          {/* Hero Content Grid */}
-          <div className="relative z-10 p-6 sm:p-10 lg:p-12 flex flex-col lg:flex-row items-center gap-8">
-            {/* Left Poster Thumbnail Card */}
-            <div className="relative w-44 sm:w-52 aspect-[3/4] rounded-2xl overflow-hidden border border-white/15 shadow-2xl shrink-0 group">
-              <Image
-                src="/images/hero-art.jpg"
-                alt="Skywhale Chronicle Titan Poster"
-                fill
-                className="object-cover object-top group-hover:scale-105 transition-transform duration-500"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
-              <div className="absolute bottom-3 left-3 right-3 text-center">
-                <span className="text-[11px] font-bold text-white tracking-widest uppercase bg-black/60 backdrop-blur-md px-2 py-0.5 rounded-full border border-white/10">
-                  Episode 9 Live
-                </span>
-              </div>
-            </div>
+        {/* 1. Dedicated Category View: Trending */}
+        {activeCategory === "Trending" && (
+          <CategoryExplorer
+            categoryKey="trending"
+            categoryTitle="Trending Anime Explorer"
+            categoryDescription="Currently most-talked about and streamed anime series across global audiences."
+            onBackToHome={() => switchCategory("All")}
+            onSelectAnime={setSelectedAnime}
+          />
+        )}
 
-            {/* Right Hero Details */}
-            <div className="flex-1 space-y-4 text-left">
-              {/* Badges */}
-              <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
-                <span className="bg-[#ff5238] text-white px-3 py-1 rounded-full shadow-lg shadow-[#ff5238]/30 flex items-center gap-1.5">
-                  <span>🔥</span> #1 Trending Now
-                </span>
-                <span className="bg-[#141824]/80 backdrop-blur-md border border-[#2b3348] text-white/90 px-3 py-1 rounded-full">
-                  Fall 2026 • TV (24 eps)
-                </span>
-                <span className="bg-emerald-950/80 border border-emerald-500/40 text-emerald-400 px-2.5 py-1 rounded-full flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Airing
-                </span>
-              </div>
+        {/* 2. Dedicated Category View: Top Rated */}
+        {activeCategory === "Top Rated" && (
+          <CategoryExplorer
+            categoryKey="top-rated"
+            categoryTitle="All-Time Hall of Fame (Top Rated)"
+            categoryDescription="The highest critically-acclaimed anime masterpieces ranked by community reviews."
+            onBackToHome={() => switchCategory("All")}
+            onSelectAnime={setSelectedAnime}
+          />
+        )}
 
-              {/* Title */}
-              <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black tracking-tight text-white uppercase leading-none drop-shadow-md">
-                Skywhale Chronicle
-              </h1>
+        {/* 3. Dedicated Category View: Upcoming */}
+        {activeCategory === "Upcoming" && (
+          <CategoryExplorer
+            categoryKey="upcoming"
+            categoryTitle="Most Anticipated Upcoming Anime"
+            categoryDescription="Upcoming releases, highly awaited sequels, and theatrical anime movies."
+            onBackToHome={() => switchCategory("All")}
+            onSelectAnime={setSelectedAnime}
+          />
+        )}
 
-              {/* Description */}
-              <p className="max-w-2xl text-xs sm:text-sm text-[#aab6d1] leading-relaxed line-clamp-3">
-                In a world of shattered floating skies, sky-whale leviathans navigate the ethereal tempest... Join the wanderer Ren on a voyage through forbidden heavens to uncover an ancient celestial mystery that could restore the falling realms.
-              </p>
+        {/* 4. Dedicated Category View: Seasonal */}
+        {activeCategory === "Seasonal" && (
+          <CategoryExplorer
+            categoryKey="seasonal"
+            categoryTitle={`${seasonInfo.season} ${seasonInfo.seasonYear} Seasonal Chart`}
+            categoryDescription="Everything airing right now in this season's television and streaming lineup."
+            onBackToHome={() => switchCategory("All")}
+            onSelectAnime={setSelectedAnime}
+          />
+        )}
 
-              {/* Metadata & Genres */}
-              <div className="flex flex-wrap items-center gap-2.5 text-xs text-[#95a3c2] pt-1">
-                <div className="flex items-center gap-1 text-[#ffb703] font-bold bg-[#151926] px-2.5 py-1 rounded-lg border border-[#252d42]">
-                  <span>★</span>
-                  <span className="text-white">9.12</span>
-                  <span className="text-[#6d7994] font-normal">(128k reviews)</span>
+        {/* 5. Dedicated Category View: Full Weekly Schedule */}
+        {activeCategory === "Schedule" && (
+          <ScheduleExplorer
+            onBackToHome={() => switchCategory("All")}
+            onSelectAnime={setSelectedAnime}
+          />
+        )}
+
+        {/* 6. Curated Home Dashboard (Rendered when activeCategory is "All") */}
+        {activeCategory === "All" && (
+          <>
+            {/* ================= MASSIVE HERO FEATURED SHOWCASE ================= */}
+            <section className="relative rounded-3xl overflow-hidden border border-[#202738] bg-[#0c0f17] shadow-2xl min-h-[380px]">
+              {isLoading ? (
+                <div className="p-8 sm:p-12 flex flex-col justify-center gap-4 animate-pulse">
+                  <div className="h-6 w-32 bg-[#1b2234] rounded-full"></div>
+                  <div className="h-12 w-3/4 max-w-xl bg-[#1b2234] rounded-xl"></div>
+                  <div className="h-4 w-full max-w-lg bg-[#1b2234] rounded"></div>
+                  <div className="h-4 w-2/3 max-w-md bg-[#1b2234] rounded"></div>
                 </div>
-                <span className="bg-[#151926] px-2.5 py-1 rounded-lg border border-[#252d42]">Adventure</span>
-                <span className="bg-[#151926] px-2.5 py-1 rounded-lg border border-[#252d42]">Fantasy</span>
-                <span className="bg-[#151926] px-2.5 py-1 rounded-lg border border-[#252d42]">Drama</span>
-                <span className="bg-[#151926] px-2.5 py-1 rounded-lg border border-[#252d42]">Sci-Fi • 24 min/ep</span>
-              </div>
-
-              {/* Actions & Pagination */}
-              <div className="flex flex-wrap items-center justify-between gap-4 pt-3">
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    className="bg-gradient-to-r from-[#ff5238] to-[#ea3a22] hover:from-[#ff674f] hover:to-[#f24730] text-white font-semibold text-sm px-6 py-2.5 rounded-xl shadow-lg shadow-[#ff5238]/30 flex items-center gap-2 cursor-pointer transition-all active:scale-95"
-                  >
-                    <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
-                      <path d="M8 5v14l11-7z" />
-                    </svg>
-                    <span>Watch Now</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    className="bg-[#171b29]/80 hover:bg-[#202638] text-white font-medium text-sm px-4 py-2.5 rounded-xl border border-[#28324a] flex items-center gap-1.5 cursor-pointer transition-all"
-                  >
-                    <span>+</span>
-                    <span>Add to List</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    className="text-xs text-[#8c9ab8] hover:text-white px-3 py-2 transition-colors cursor-pointer"
-                  >
-                    View Details
-                  </button>
-                </div>
-
-                {/* Pagination Pill Indicators */}
-                <div className="flex items-center gap-2 text-right">
-                  <span className="text-[10px] text-[#707e9e] font-semibold tracking-wider uppercase hidden sm:inline">
-                    EPISODE 9 PREMIERES TODAY
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-5 h-1.5 rounded-full bg-[#ff5238]"></span>
-                    <span className="w-1.5 h-1.5 rounded-full bg-white/20"></span>
-                    <span className="w-1.5 h-1.5 rounded-full bg-white/20"></span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* ================= CONTINUE WATCHING ================= */}
-        <section className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">Continue Watching</h2>
-            <Link href="/library" className="text-xs font-semibold text-[#8c9ab8] hover:text-[#ff5238] transition-colors">
-              My Library →
-            </Link>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {continueWatching.map((item) => (
-              <div
-                key={item.id}
-                className="bg-[#0f121b] border border-[#1f2536] hover:border-[#313b52] rounded-2xl p-3 flex items-center gap-4 transition-all duration-300 group"
-              >
-                <div className="relative w-28 sm:w-32 aspect-[16/10] rounded-xl overflow-hidden shrink-0 bg-[#161a26]">
-                  <Image
-                    src={item.image}
-                    alt={item.title}
-                    fill
-                    className="object-cover group-hover:scale-105 transition-transform duration-500"
-                  />
-                  <div className="absolute inset-0 bg-black/30"></div>
-                </div>
-
-                <div className="flex-1 min-w-0 space-y-2">
-                  <div>
-                    <h3 className="text-sm font-bold text-white truncate leading-tight group-hover:text-[#ff5238] transition-colors">
-                      {item.title}
-                    </h3>
-                    <p className="text-[11px] text-[#7b89a6] mt-0.5 truncate">{item.progress}</p>
-                  </div>
-
-                  {/* Progress Bar */}
-                  <div className="w-full bg-[#1b202e] h-1.5 rounded-full overflow-hidden">
-                    <div
-                      className="bg-[#ff5238] h-full rounded-full transition-all"
-                      style={{ width: `${item.percent}%` }}
-                    ></div>
-                  </div>
-
-                  {/* Resume Action */}
-                  <div className="flex items-center justify-between pt-0.5">
-                    <button
-                      type="button"
-                      className="inline-flex items-center gap-1.5 bg-[#171c29] hover:bg-[#ff5238] hover:text-white border border-[#263045] hover:border-[#ff5238] text-[11px] text-white/90 font-medium px-3 py-1 rounded-lg transition-all cursor-pointer"
-                    >
-                      <span>▶</span>
-                      <span>Resume</span>
-                    </button>
-                    <button type="button" aria-label="Menu" className="text-[#64718e] hover:text-white p-1 text-xs">
-                      •••
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* ================= TRENDING NOW ================= */}
-        <section className="space-y-4">
-          <div className="flex items-end justify-between">
-            <div>
-              <span className="text-[10px] font-bold text-[#ff5238] tracking-widest uppercase">
-                Weekly Audience Choice Ranking
-              </span>
-              <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight mt-0.5">Trending Now</h2>
-            </div>
-            <div className="flex items-center gap-2">
-              <Link href="/trending" className="text-xs font-semibold text-[#8c9ab8] hover:text-[#ff5238] transition-colors mr-2">
-                View all →
-              </Link>
-              <button aria-label="Previous" className="w-7 h-7 rounded-lg bg-[#11141e] border border-[#212738] hover:border-[#353f57] text-[#8e9cb9] hover:text-white flex items-center justify-center text-xs cursor-pointer">
-                ‹
-              </button>
-              <button aria-label="Next" className="w-7 h-7 rounded-lg bg-[#11141e] border border-[#212738] hover:border-[#353f57] text-[#8e9cb9] hover:text-white flex items-center justify-center text-xs cursor-pointer">
-                ›
-              </button>
-            </div>
-          </div>
-
-          {/* 7 Vertical Poster Cards Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-3 sm:gap-4">
-            {trendingList.map((anime) => (
-              <div
-                key={anime.title}
-                className="group relative rounded-2xl overflow-hidden bg-[#0e111a] border border-[#1e2434] hover:border-[#ff5238]/60 hover:shadow-xl hover:shadow-[#ff5238]/10 transition-all duration-300 flex flex-col cursor-pointer"
-              >
-                {/* Poster Image */}
-                <div className="relative aspect-[3/4.2] w-full overflow-hidden bg-[#161a26]">
-                  <Image
-                    src={anime.image}
-                    alt={anime.title}
-                    fill
-                    className="object-cover group-hover:scale-105 transition-transform duration-500"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#0e111a] via-black/20 to-transparent"></div>
-
-                  {/* Top Badges */}
-                  <div className="absolute top-2 left-2 right-2 flex items-center justify-between">
-                    <span className="bg-[#0b0e16]/85 backdrop-blur-md border border-white/10 text-white text-[10px] font-bold px-2 py-0.5 rounded-md shadow-sm">
-                      {anime.rating}
-                    </span>
-                    {anime.badge && (
-                      <span className="bg-[#ff5238] text-white text-[9px] font-black tracking-wider px-1.5 py-0.5 rounded shadow-sm">
-                        {anime.badge}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Bottom Rank */}
-                  <span className="absolute bottom-2 left-2 text-2xl font-black text-white/90 drop-shadow-md">
-                    {anime.rank}
-                  </span>
-                </div>
-
-                {/* Details */}
-                <div className="p-2.5 flex-1 flex flex-col justify-between">
-                  <h3 className="text-xs font-bold text-white truncate leading-tight group-hover:text-[#ff5238] transition-colors">
-                    {anime.title}
-                  </h3>
-                  <div className="mt-1 text-[10px] text-[#717f9e]">
-                    <p className="truncate">{anime.type}</p>
-                    <p className="truncate text-[#596683]">{anime.episodes}</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* ================= AIRING SCHEDULE WIDGET ================= */}
-        <section className="bg-[#0c0f17] border border-[#1e2434] rounded-2xl p-5 sm:p-6">
-          <div className="flex flex-col lg:flex-row items-stretch gap-6">
-            {/* Left Control Card */}
-            <div className="lg:w-60 shrink-0 space-y-3">
-              <span className="text-[10px] font-bold text-cyan-400 tracking-wider uppercase bg-cyan-950/60 border border-cyan-500/30 px-2 py-0.5 rounded-md">
-                Today&apos;s Lineup
-              </span>
-              <h2 className="text-lg font-bold text-white tracking-tight">Airing Schedule</h2>
-
-              {/* Day Selector Pills */}
-              <div className="flex items-center gap-1 pt-1">
-                {["M", "T", "W", "T", "F", "S", "S"].map((day, idx) => {
-                  const isActive = idx === 3 && activeScheduleDay === "T";
-                  return (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => setActiveScheduleDay(day)}
-                      className={`w-7 h-7 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                        isActive
-                          ? "bg-[#ff5238] text-white shadow-md shadow-[#ff5238]/30"
-                          : "bg-[#141824] border border-[#232b3d] text-[#7c8aa6] hover:text-white"
-                      }`}
-                    >
-                      {day}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <Link
-                href="/schedule"
-                className="inline-flex items-center gap-1.5 text-xs text-[#a2b0ce] hover:text-white font-medium pt-2"
-              >
-                <span>📅 Full Schedule</span>
-                <span>→</span>
-              </Link>
-            </div>
-
-            {/* Right Schedule Items List */}
-            <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              {[
-                {
-                  time: "18:30",
-                  status: "LIVE",
-                  statusColor: "bg-red-500",
-                  title: "Skywhale Chronicle EP 9",
-                  category: "Action • Sci-Fi",
-                },
-                {
-                  time: "20:00",
-                  status: "In 1h 20m",
-                  statusColor: "bg-emerald-400",
-                  title: "Neon Requiem EP 10",
-                  category: "Fantasy • Mystery",
-                },
-                {
-                  time: "21:15",
-                  status: "Tomorrow",
-                  statusColor: "bg-cyan-400",
-                  title: "Paper Moons EP 6",
-                  category: "Romance • Drama",
-                },
-                {
-                  time: "23:00",
-                  status: "Fri",
-                  statusColor: "bg-purple-400",
-                  title: "Hollow Circuit EP 8",
-                  category: "Mecha • Cyberpunk",
-                },
-              ].map((item, idx) => (
-                <div
-                  key={idx}
-                  className="bg-[#11141f] border border-[#212739] hover:border-[#323d57] rounded-xl p-3.5 space-y-2 flex flex-col justify-between transition-colors"
-                >
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="font-mono text-white font-bold">{item.time}</span>
-                    <span className="text-[10px] font-semibold text-white/90 bg-[#191f2f] px-2 py-0.5 rounded-md border border-white/5 flex items-center gap-1">
-                      <span className={`w-1.5 h-1.5 rounded-full ${item.statusColor}`}></span>
-                      {item.status}
-                    </span>
-                  </div>
-                  <div>
-                    <h3 className="text-xs font-bold text-white truncate">{item.title}</h3>
-                    <p className="text-[10px] text-[#717f9e] mt-0.5">{item.category}</p>
-                  </div>
-                  <button
-                    type="button"
-                    className="w-full text-center text-[10px] font-semibold text-[#8f9ebf] hover:text-white bg-[#171c2b] hover:bg-[#20273a] py-1.5 rounded-lg border border-[#252e44] transition-colors cursor-pointer"
-                  >
-                    🔔 Remind me
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* ================= FALL 2026 SEASONAL ================= */}
-        <section className="space-y-4">
-          <div className="flex items-end justify-between">
-            <div>
-              <span className="text-[10px] font-bold text-[#ff5238] tracking-widest uppercase">
-                Seasonal Chart
-              </span>
-              <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight mt-0.5">
-                Fall 2026 Seasonal
-              </h2>
-            </div>
-            <div className="flex items-center gap-2">
-              <Link href="/seasonal" className="text-xs font-semibold text-[#8c9ab8] hover:text-[#ff5238] transition-colors mr-2">
-                View all →
-              </Link>
-              <button aria-label="Previous" className="w-7 h-7 rounded-lg bg-[#11141e] border border-[#212738] hover:border-[#353f57] text-[#8e9cb9] hover:text-white flex items-center justify-center text-xs cursor-pointer">
-                ‹
-              </button>
-              <button aria-label="Next" className="w-7 h-7 rounded-lg bg-[#11141e] border border-[#212738] hover:border-[#353f57] text-[#8e9cb9] hover:text-white flex items-center justify-center text-xs cursor-pointer">
-                ›
-              </button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-3 sm:gap-4">
-            {seasonalList.map((anime) => (
-              <div
-                key={anime.title}
-                className="group relative rounded-2xl overflow-hidden bg-[#0e111a] border border-[#1e2434] hover:border-[#ff5238]/60 hover:shadow-xl hover:shadow-[#ff5238]/10 transition-all duration-300 flex flex-col cursor-pointer"
-              >
-                <div className="relative aspect-[3/4.2] w-full overflow-hidden bg-[#161a26]">
-                  <Image
-                    src={anime.image}
-                    alt={anime.title}
-                    fill
-                    className="object-cover group-hover:scale-105 transition-transform duration-500"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#0e111a] via-black/20 to-transparent"></div>
-
-                  <div className="absolute top-2 left-2 right-2 flex items-center justify-between">
-                    <span className="bg-[#0b0e16]/85 backdrop-blur-md border border-white/10 text-white text-[10px] font-bold px-2 py-0.5 rounded-md shadow-sm">
-                      {anime.rating}
-                    </span>
-                    {anime.badge && (
-                      <span className="bg-[#ff5238] text-white text-[9px] font-black tracking-wider px-1.5 py-0.5 rounded shadow-sm">
-                        {anime.badge}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="p-2.5 flex-1 flex flex-col justify-between">
-                  <h3 className="text-xs font-bold text-white truncate leading-tight group-hover:text-[#ff5238] transition-colors">
-                    {anime.title}
-                  </h3>
-                  <div className="mt-1 text-[10px] text-[#717f9e]">
-                    <p className="truncate">{anime.type}</p>
-                    <p className="truncate text-[#596683]">{anime.episodes}</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* ================= 2-COLUMN ROW: RECOMMENDED FOR YOU & STATS ================= */}
-        <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left 2 Cols: Recommended For You */}
-          <div className="lg:col-span-2 bg-[#0c0f17] border border-[#1e2434] rounded-2xl p-5 sm:p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-base sm:text-lg font-bold text-white tracking-tight">Recommended For You</h2>
-                <p className="text-[11px] text-[#7583a1]">Based on your affinity for Cyberpunk + Fantasy</p>
-              </div>
-              <span className="text-[10px] bg-[#161a26] text-[#7e8ca8] px-2.5 py-1 rounded-full border border-[#252c3f]">
-                Curated by AI Taste Engine
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {[
-                {
-                  title: "Starfall Bakery",
-                  match: "Because you liked slice-of-life",
-                  image: "/images/starfall-bakery.jpg",
-                  rating: "9.28",
-                },
-                {
-                  title: "Ronin's Alley",
-                  match: "Similar to Iron Blossom",
-                  image: "/images/neon-requiem.jpg",
-                  rating: "9.11",
-                },
-                {
-                  title: "Hollow Circuit",
-                  match: "Sci-Fi • 98% Match",
-                  image: "/images/hollow-circuit.jpg",
-                  rating: "8.98",
-                },
-              ].map((rec, i) => (
-                <div
-                  key={i}
-                  className="bg-[#10141f] border border-[#202638] hover:border-[#323d57] rounded-xl overflow-hidden group cursor-pointer transition-colors"
-                >
-                  <div className="relative aspect-[16/10] w-full bg-[#181d2a]">
+              ) : heroAnime ? (
+                <>
+                  {/* Background Art */}
+                  <div className="absolute inset-0 z-0">
                     <Image
-                      src={rec.image}
-                      alt={rec.title}
+                      src={heroCover}
+                      alt={heroTitle}
                       fill
-                      className="object-cover group-hover:scale-105 transition-transform duration-500"
+                      priority
+                      className="object-cover object-center brightness-60 scale-105"
+                      sizes="100vw"
                     />
-                    <div className="absolute top-2 right-2 bg-black/75 px-1.5 py-0.5 rounded text-[10px] font-bold text-[#ffb703]">
-                      ★ {rec.rating}
+                    <div className="absolute inset-0 bg-gradient-to-t from-[#0a0d14] via-[#0a0d14]/75 to-[#0a0d14]/40"></div>
+                    <div className="absolute inset-0 bg-gradient-to-r from-[#0a0d14] via-[#0a0d14]/85 to-transparent"></div>
+                  </div>
+
+                  {/* Hero Content Grid */}
+                  <div className="relative z-10 p-6 sm:p-10 lg:p-12 flex flex-col lg:flex-row items-center gap-8">
+                    {/* Left Poster Thumbnail Card */}
+                    <div
+                      onClick={() => setSelectedAnime(heroAnime)}
+                      className="relative w-44 sm:w-52 aspect-[3/4] rounded-2xl overflow-hidden border border-white/15 shadow-2xl shrink-0 group cursor-pointer"
+                    >
+                      <Image
+                        src={heroPoster}
+                        alt={heroTitle}
+                        fill
+                        className="object-cover object-top group-hover:scale-105 transition-transform duration-500"
+                        sizes="(max-width: 640px) 176px, 208px"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
+                      <div className="absolute bottom-3 left-3 right-3 text-center">
+                        <span className="text-[11px] font-bold text-white tracking-widest uppercase bg-black/60 backdrop-blur-md px-2.5 py-0.5 rounded-full border border-white/10">
+                          {heroAnime.nextAiringEpisode ? `EP ${heroAnime.nextAiringEpisode.episode} Soon` : `${heroAnime.format || "TV"}`}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Right Hero Details */}
+                    <div className="flex-1 space-y-4 text-left">
+                      {/* Badges */}
+                      <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+                        <span className="bg-[#ff5238] text-white px-3 py-1 rounded-full shadow-lg shadow-[#ff5238]/30 flex items-center gap-1.5">
+                          <span>🔥</span> #{heroIndex + 1} Trending on AniList
+                        </span>
+                        <span className="bg-[#141824]/80 backdrop-blur-md border border-[#2b3348] text-white/90 px-3 py-1 rounded-full">
+                          {heroAnime.season} {heroAnime.seasonYear || ""} • {heroAnime.format || "TV"}
+                          {heroAnime.episodes ? ` (${heroAnime.episodes} eps)` : ""}
+                        </span>
+                        {heroAnime.status === "RELEASING" && (
+                          <span className="bg-emerald-950/80 border border-emerald-500/40 text-emerald-400 px-2.5 py-1 rounded-full flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Airing Now
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Title */}
+                      <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black tracking-tight text-white uppercase leading-none drop-shadow-md">
+                        {heroTitle}
+                      </h1>
+
+                      {/* Description */}
+                      <p className="max-w-2xl text-xs sm:text-sm text-[#aab6d1] leading-relaxed line-clamp-3">
+                        {heroSynopsis}
+                      </p>
+
+                      {/* Metadata & Genres */}
+                      <div className="flex flex-wrap items-center gap-2.5 text-xs text-[#95a3c2] pt-1">
+                        <div className="flex items-center gap-1 text-[#ffb703] font-bold bg-[#151926] px-2.5 py-1 rounded-lg border border-[#252d42]">
+                          <span>★</span>
+                          <span className="text-white">{heroScore}</span>
+                          <span className="text-[#6d7994] font-normal">/ 10</span>
+                        </div>
+                        <span className="bg-[#151926] px-2.5 py-1 rounded-lg border border-[#252d42] text-white font-medium">
+                          {heroStudio}
+                        </span>
+                        {heroAnime.genres?.slice(0, 3).map((genre) => (
+                          <span key={genre} className="bg-[#151926] px-2.5 py-1 rounded-lg border border-[#252d42]">
+                            {genre}
+                          </span>
+                        ))}
+                      </div>
+
+                      {/* Actions & Pagination */}
+                      <div className="flex flex-wrap items-center justify-between gap-4 pt-3">
+                        <div className="flex items-center gap-3">
+                          <Link
+                            href={`/anime/${heroAnime.id}`}
+                            className="bg-gradient-to-r from-[#ff5238] to-[#ea3a22] hover:from-[#ff674f] hover:to-[#f24730] text-white font-semibold text-sm px-6 py-2.5 rounded-xl shadow-lg shadow-[#ff5238]/30 flex items-center gap-2 cursor-pointer transition-all active:scale-95"
+                          >
+                            <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                              <path d="M8 5v14l11-7z" />
+                            </svg>
+                            <span>View Full Details</span>
+                          </Link>
+
+                          <button
+                            type="button"
+                            onClick={() => setSelectedAnime(heroAnime)}
+                            className="bg-[#171b29]/80 hover:bg-[#202638] text-white font-medium text-sm px-4 py-2.5 rounded-xl border border-[#28324a] flex items-center gap-1.5 cursor-pointer transition-all"
+                          >
+                            <span>+</span>
+                            <span>Add to List</span>
+                          </button>
+                        </div>
+
+                        {/* Pagination Pill Indicators */}
+                        <div className="flex items-center gap-2 text-right">
+                          <span className="text-[10px] text-[#707e9e] font-semibold tracking-wider uppercase hidden sm:inline">
+                            TOP PICKS
+                          </span>
+                          <div className="flex items-center gap-1.5">
+                            {[0, 1, 2].map((idx) => (
+                              <button
+                                key={idx}
+                                onClick={() => setHeroIndex(idx)}
+                                aria-label={`Hero item ${idx + 1}`}
+                                className={`h-2 rounded-full transition-all cursor-pointer ${
+                                  heroIndex === idx ? "w-6 bg-[#ff5238]" : "w-2 bg-white/20 hover:bg-white/40"
+                                }`}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                  <div className="p-3 space-y-1">
-                    <p className="text-[10px] text-cyan-400 font-medium truncate">{rec.match}</p>
-                    <h3 className="text-xs font-bold text-white truncate">{rec.title}</h3>
-                    <button
-                      type="button"
-                      className="mt-2 w-full text-center text-[10px] bg-[#181d2a] hover:bg-[#ff5238] hover:text-white text-[#8e9cb8] py-1 rounded-lg border border-[#273045] transition-colors cursor-pointer"
-                    >
-                      + Add to Plan
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+                </>
+              ) : null}
+            </section>
 
-          {/* Right Col: My Stats Snapshot */}
-          <div className="bg-[#0c0f17] border border-[#1e2434] rounded-2xl p-5 sm:p-6 space-y-5 flex flex-col justify-between">
-            <div className="space-y-4">
-              <h2 className="text-base sm:text-lg font-bold text-white tracking-tight">My Stats Snapshot</h2>
-
-              {/* Number Badges */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-[#11141f] border border-[#212739] rounded-xl p-3 text-center">
-                  <div className="text-2xl font-black text-white">342</div>
-                  <div className="text-[10px] text-[#6e7c99] uppercase tracking-wider font-semibold">Episodes Watched</div>
+            {/* ================= TRENDING NOW ================= */}
+            <section id="trending" className="space-y-4">
+              <div className="flex items-end justify-between">
+                <div>
+                  <span className="text-[10px] font-bold text-[#ff5238] tracking-widest uppercase">
+                    Real-Time AniList Popularity
+                  </span>
+                  <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight mt-0.5">
+                    Trending Now
+                  </h2>
                 </div>
-                <div className="bg-[#11141f] border border-[#212739] rounded-xl p-3 text-center">
-                  <div className="text-2xl font-black text-white">61d</div>
-                  <div className="text-[10px] text-[#6e7c99] uppercase tracking-wider font-semibold">Total Watch Time</div>
-                </div>
+                {/* View All Button triggers Category Mode */}
+                <button
+                  type="button"
+                  onClick={() => switchCategory("Trending")}
+                  className="text-xs font-semibold text-[#8c9ab8] hover:text-[#ff5238] transition-colors cursor-pointer group flex items-center gap-1"
+                >
+                  <span>View all</span>
+                  <span className="group-hover:translate-x-0.5 transition-transform">→</span>
+                </button>
               </div>
 
-              {/* Genre Bar */}
-              <div className="space-y-2">
-                <div className="flex justify-between text-[11px] text-[#818fae]">
-                  <span>Genre Breakdown</span>
-                  <span className="text-white font-medium">Top: Action</span>
+              {/* Cards Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-3 sm:gap-4">
+                {isLoading
+                  ? Array.from({ length: 7 }).map((_, i) => (
+                      <div key={i} className="aspect-[3/4.2] bg-[#111520] rounded-2xl animate-pulse"></div>
+                    ))
+                  : trending.slice(0, 14).map((anime, idx) => (
+                      <AnimeCard
+                        key={anime.id}
+                        anime={anime}
+                        rank={`#${idx + 1}`}
+                        badge={idx === 0 ? "HOT" : idx === 1 ? "TOP" : idx === 2 ? "NEW" : null}
+                        onClick={setSelectedAnime}
+                      />
+                    ))}
+              </div>
+            </section>
+
+            {/* ================= AIRING SCHEDULE WIDGET ================= */}
+            <section id="schedule" className="bg-[#0c0f17] border border-[#1e2434] rounded-2xl p-5 sm:p-6">
+              <div className="flex flex-col lg:flex-row items-stretch gap-6">
+                {/* Left Control Card */}
+                <div className="lg:w-64 shrink-0 space-y-3">
+                  <span className="text-[10px] font-bold text-cyan-400 tracking-wider uppercase bg-cyan-950/60 border border-cyan-500/30 px-2 py-0.5 rounded-md">
+                    Live Broadcasts
+                  </span>
+                  <h2 className="text-lg font-bold text-white tracking-tight">Airing Schedule</h2>
+
+                  {/* Day Selector Pills (Mon to Sun) */}
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {weekDays.map((d) => {
+                      const isActive = scheduleOffset === d.offset;
+                      return (
+                        <button
+                          key={d.offset}
+                          type="button"
+                          onClick={() => handleDaySelect(d.offset)}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                            isActive
+                              ? "bg-[#ff5238] text-white shadow-md shadow-[#ff5238]/30"
+                              : "bg-[#141824] border border-[#232b3d] text-[#7c8aa6] hover:text-white"
+                          }`}
+                          title={`${d.label} (${d.dateFormatted})`}
+                        >
+                          {d.short}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => switchCategory("Schedule")}
+                    className="inline-flex items-center gap-1.5 text-xs text-[#a2b0ce] hover:text-[#ff5238] font-semibold pt-2 cursor-pointer transition-colors"
+                  >
+                    <span>📅 Full Weekly Calendar</span>
+                    <span>→</span>
+                  </button>
                 </div>
-                <div className="w-full h-2 rounded-full overflow-hidden flex bg-[#161a26]">
-                  <div className="bg-[#ff5238] h-full" style={{ width: "45%" }} title="Action 45%"></div>
-                  <div className="bg-cyan-400 h-full" style={{ width: "28%" }} title="Sci-Fi 28%"></div>
-                  <div className="bg-amber-400 h-full" style={{ width: "15%" }} title="Drama 15%"></div>
-                  <div className="bg-indigo-500 h-full" style={{ width: "12%" }} title="Others 12%"></div>
-                </div>
-                <div className="flex items-center gap-3 text-[10px] text-[#717e9c] pt-1">
-                  <span className="flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-[#ff5238]"></span> Action 45%
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-cyan-400"></span> Sci-Fi 28%
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-amber-400"></span> Drama 15%
-                  </span>
+
+                {/* Right Schedule Items List */}
+                <div className="flex-1">
+                  {isScheduleLoading ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                      {Array.from({ length: 4 }).map((_, i) => (
+                        <div key={i} className="h-28 bg-[#131826] rounded-xl animate-pulse"></div>
+                      ))}
+                    </div>
+                  ) : schedule.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                      {schedule.slice(0, 8).map((item) => (
+                        <div
+                          key={item.id}
+                          onClick={() => setSelectedAnime(item.media)}
+                          className="bg-[#11141f] border border-[#212739] hover:border-[#323d57] rounded-xl p-3.5 space-y-2 flex flex-col justify-between transition-colors cursor-pointer group"
+                        >
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-mono text-white font-bold">
+                              {formatAiringTime(item.airingAt)}
+                            </span>
+                            <span className="text-[10px] font-semibold text-white/90 bg-[#191f2f] px-2 py-0.5 rounded-md border border-white/5 flex items-center gap-1">
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full ${
+                                  item.timeUntilAiring <= 0
+                                    ? "bg-red-500 animate-pulse"
+                                    : "bg-emerald-400"
+                                }`}
+                              ></span>
+                              {formatCountdown(item.timeUntilAiring)}
+                            </span>
+                          </div>
+                          <div>
+                            <h3 className="text-xs font-bold text-white truncate group-hover:text-[#ff5238] transition-colors">
+                              {getAnimeTitle(item.media?.title)} EP {item.episode}
+                            </h3>
+                            <p className="text-[10px] text-[#717f9e] mt-0.5 truncate">
+                              {item.media?.genres?.slice(0, 2).join(" • ") || item.media?.format || "Anime"}
+                            </p>
+                          </div>
+                          <div className="flex items-center justify-between pt-1">
+                            <span className="text-[10px] text-[#8e9bb8]">
+                              {item.media?.averageScore ? `★ ${formatScore(item.media.averageScore)}` : ""}
+                            </span>
+                            <span className="text-[10px] text-cyan-400 font-semibold group-hover:underline">
+                              View Show →
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="h-full flex items-center justify-center p-8 text-center text-xs text-[#6e7d9b] bg-[#11141f] rounded-xl">
+                      No scheduled anime broadcasts found for this day.
+                    </div>
+                  )}
                 </div>
               </div>
-            </div>
+            </section>
 
-            <button
-              type="button"
-              className="w-full bg-[#161b28] hover:bg-[#20273a] text-white text-xs font-semibold py-2.5 rounded-xl border border-[#293247] transition-colors cursor-pointer"
-            >
-              Open Full Statistics →
-            </button>
-          </div>
-        </section>
-
-        {/* ================= TOP RATED OF ALL TIME (HALL OF FAME) ================= */}
-        <section className="space-y-4">
-          <div className="flex items-end justify-between">
-            <div>
-              <span className="text-[10px] font-bold text-[#ff5238] tracking-widest uppercase">
-                Hall of Fame
-              </span>
-              <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight mt-0.5">
-                Top Rated of All Time
-              </h2>
-            </div>
-            <div className="flex items-center gap-2">
-              <Link href="/top-rated" className="text-xs font-semibold text-[#8c9ab8] hover:text-[#ff5238] transition-colors mr-2">
-                View all →
-              </Link>
-              <button aria-label="Previous" className="w-7 h-7 rounded-lg bg-[#11141e] border border-[#212738] hover:border-[#353f57] text-[#8e9cb9] hover:text-white flex items-center justify-center text-xs cursor-pointer">
-                ‹
-              </button>
-              <button aria-label="Next" className="w-7 h-7 rounded-lg bg-[#11141e] border border-[#212738] hover:border-[#353f57] text-[#8e9cb9] hover:text-white flex items-center justify-center text-xs cursor-pointer">
-                ›
-              </button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-3 sm:gap-4">
-            {hallOfFame.map((anime) => (
-              <div
-                key={anime.title}
-                className="group relative rounded-2xl overflow-hidden bg-[#0e111a] border border-[#1e2434] hover:border-[#ff5238]/60 hover:shadow-xl hover:shadow-[#ff5238]/10 transition-all duration-300 flex flex-col cursor-pointer"
-              >
-                <div className="relative aspect-[3/4.2] w-full overflow-hidden bg-[#161a26]">
-                  <Image
-                    src={anime.image}
-                    alt={anime.title}
-                    fill
-                    className="object-cover group-hover:scale-105 transition-transform duration-500"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#0e111a] via-black/20 to-transparent"></div>
-
-                  <div className="absolute top-2 left-2 right-2 flex items-center justify-between">
-                    <span className="bg-[#0b0e16]/85 backdrop-blur-md border border-white/10 text-white text-[10px] font-bold px-2 py-0.5 rounded-md shadow-sm">
-                      {anime.rating}
-                    </span>
-                    {anime.badge && (
-                      <span className="bg-[#ff5238] text-white text-[9px] font-black tracking-wider px-1.5 py-0.5 rounded shadow-sm">
-                        {anime.badge}
-                      </span>
-                    )}
-                  </div>
+            {/* ================= SEASONAL CHART ================= */}
+            <section id="seasonal" className="space-y-4">
+              <div className="flex items-end justify-between">
+                <div>
+                  <span className="text-[10px] font-bold text-[#ff5238] tracking-widest uppercase">
+                    Seasonal Chart
+                  </span>
+                  <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight mt-0.5">
+                    {seasonInfo.season} {seasonInfo.seasonYear} Seasonal Anime
+                  </h2>
                 </div>
-
-                <div className="p-2.5 flex-1 flex flex-col justify-between">
-                  <h3 className="text-xs font-bold text-white truncate leading-tight group-hover:text-[#ff5238] transition-colors">
-                    {anime.title}
-                  </h3>
-                  <div className="mt-1 text-[10px] text-[#717f9e]">
-                    <p className="truncate">{anime.type}</p>
-                    <p className="truncate text-[#596683]">{anime.episodes}</p>
-                  </div>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => switchCategory("Seasonal")}
+                  className="text-xs font-semibold text-[#8c9ab8] hover:text-[#ff5238] transition-colors cursor-pointer group flex items-center gap-1"
+                >
+                  <span>View all</span>
+                  <span className="group-hover:translate-x-0.5 transition-transform">→</span>
+                </button>
               </div>
-            ))}
-          </div>
-        </section>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-3 sm:gap-4">
+                {isLoading
+                  ? Array.from({ length: 7 }).map((_, i) => (
+                      <div key={i} className="aspect-[3/4.2] bg-[#111520] rounded-2xl animate-pulse"></div>
+                    ))
+                  : seasonal.slice(0, 14).map((anime, idx) => (
+                      <AnimeCard
+                        key={anime.id}
+                        anime={anime}
+                        badge={idx < 2 ? "AIRING" : null}
+                        onClick={setSelectedAnime}
+                      />
+                    ))}
+              </div>
+            </section>
+
+            {/* ================= TOP RATED OF ALL TIME (HALL OF FAME) ================= */}
+            <section id="top-rated" className="space-y-4">
+              <div className="flex items-end justify-between">
+                <div>
+                  <span className="text-[10px] font-bold text-[#ff5238] tracking-widest uppercase">
+                    Hall of Fame
+                  </span>
+                  <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight mt-0.5">
+                    Top Rated of All Time
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => switchCategory("Top Rated")}
+                  className="text-xs font-semibold text-[#8c9ab8] hover:text-[#ff5238] transition-colors cursor-pointer group flex items-center gap-1"
+                >
+                  <span>View all</span>
+                  <span className="group-hover:translate-x-0.5 transition-transform">→</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-3 sm:gap-4">
+                {isLoading
+                  ? Array.from({ length: 7 }).map((_, i) => (
+                      <div key={i} className="aspect-[3/4.2] bg-[#111520] rounded-2xl animate-pulse"></div>
+                    ))
+                  : topRated.slice(0, 14).map((anime, idx) => (
+                      <AnimeCard
+                        key={anime.id}
+                        anime={anime}
+                        rank={`#${idx + 1}`}
+                        badge={idx === 0 ? "GOAT" : null}
+                        onClick={setSelectedAnime}
+                      />
+                    ))}
+              </div>
+            </section>
+
+            {/* ================= UPCOMING ANIME ================= */}
+            <section id="upcoming" className="space-y-4">
+              <div className="flex items-end justify-between">
+                <div>
+                  <span className="text-[10px] font-bold text-cyan-400 tracking-widest uppercase">
+                    Future Releases
+                  </span>
+                  <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight mt-0.5">
+                    Most Anticipated Upcoming Anime
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => switchCategory("Upcoming")}
+                  className="text-xs font-semibold text-[#8c9ab8] hover:text-[#ff5238] transition-colors cursor-pointer group flex items-center gap-1"
+                >
+                  <span>View all</span>
+                  <span className="group-hover:translate-x-0.5 transition-transform">→</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-3 sm:gap-4">
+                {isLoading
+                  ? Array.from({ length: 7 }).map((_, i) => (
+                      <div key={i} className="aspect-[3/4.2] bg-[#111520] rounded-2xl animate-pulse"></div>
+                    ))
+                  : upcoming.slice(0, 14).map((anime) => (
+                      <AnimeCard
+                        key={anime.id}
+                        anime={anime}
+                        badge="SOON"
+                        onClick={setSelectedAnime}
+                      />
+                    ))}
+              </div>
+            </section>
+          </>
+        )}
 
         {/* ================= BOTTOM ANNOUNCEMENT BANNER ================= */}
         <section className="relative rounded-2xl overflow-hidden border border-[#232c3f] bg-gradient-to-r from-[#101420] via-[#141928] to-[#121624] p-6 sm:p-8 flex flex-col sm:flex-row items-center justify-between gap-6 shadow-xl">
           <div className="space-y-1 text-center sm:text-left">
             <h3 className="text-lg sm:text-xl font-bold text-white tracking-tight">
-              Movies & TV are coming to WatchNext.
+              Powered by AniList GraphQL Architecture
             </h3>
             <p className="text-xs text-[#8290ae] max-w-xl">
-              Expanding beyond anime: enjoy theatrical blockbusters, international cinema, and streaming series in high definition.
+              Real-time synchronization for rankings, airing broadcasts, studio data, and community scores.
             </p>
           </div>
 
@@ -1048,10 +973,10 @@ export default function HomePage() {
               ANIME
             </span>
             <span className="bg-[#1a2030] text-[#7887a6] text-xs font-medium px-3 py-1.5 rounded-xl border border-[#2b354e]">
-              MOVIES - 2026
+              GRAPHQL V2
             </span>
             <span className="bg-[#1a2030] text-[#7887a6] text-xs font-medium px-3 py-1.5 rounded-xl border border-[#2b354e]">
-              TV - 2026
+              REALTIME
             </span>
           </div>
         </section>
@@ -1072,16 +997,7 @@ export default function HomePage() {
           <Link href="/signup" className="hover:text-white transition-colors">
             Sign Up
           </Link>
-          <Link href="/about" className="hover:text-white transition-colors">
-            About
-          </Link>
-          <Link href="/api" className="hover:text-white transition-colors">
-            API
-          </Link>
-          <Link href="/status" className="hover:text-white transition-colors">
-            Status
-          </Link>
-          <span className="hover:text-[#ff5238] transition-colors cursor-pointer">Discord</span>
+          <span className="hover:text-[#ff5238] transition-colors cursor-pointer">AniList Synced</span>
         </div>
       </footer>
     </div>
